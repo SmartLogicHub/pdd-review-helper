@@ -1,0 +1,138 @@
+{
+  "schemaVersion": "1.0",
+  "name": "pdd-review-helper",
+  "displayName": "拼多多评价自动回复助手",
+  "description": "抓取拼多多商家后台 4/5 星未回复评价，按安全规则自动回复，并同步疑似差评到飞书/企业微信/飞书群。",
+  "service": {
+    "type": "local-http",
+    "baseUrl": "http://localhost:3001",
+    "startCommand": "cd server && npm start"
+  },
+  "health": {
+    "method": "GET",
+    "path": "/api/health"
+  },
+  "events": {
+    "type": "sse",
+    "method": "GET",
+    "path": "/api/automation/events/{jobId}"
+  },
+  "stop": {
+    "method": "POST",
+    "path": "/api/automation/stop/{jobId}"
+  },
+  "actions": [
+    {
+      "id": "fetch_reviews_current_account",
+      "name": "抓取当前账号最新评论",
+      "dryRun": true,
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/reviews/fetch"
+      },
+      "parameters": {
+        "dryRun": { "type": "boolean", "default": false },
+        "accountId": { "type": "string", "required": false },
+        "maxPages": { "type": "number", "required": false }
+      }
+    },
+    {
+      "id": "reply_good_reviews_current_account",
+      "name": "当前账号自动回复好评",
+      "dryRun": true,
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/automation/reply-good-reviews"
+      },
+      "parameters": {
+        "dryRun": { "type": "boolean", "default": true },
+        "maxCount": { "type": "number", "required": false },
+        "accountId": { "type": "string", "required": false },
+        "maxPages": { "type": "number", "required": false },
+        "pageTraversal": { "type": "string", "required": false },
+        "pageSuccessLimit": { "type": "number", "required": false }
+      }
+    },
+    {
+      "id": "reply_good_reviews_all_accounts",
+      "name": "全部账号顺序自动回复好评",
+      "dryRun": true,
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/automation/reply-all-accounts"
+      },
+      "parameters": {
+        "dryRun": { "type": "boolean", "default": true },
+        "maxCount": { "type": "number", "required": false },
+        "maxPages": { "type": "number", "required": false },
+        "pageTraversal": { "type": "string", "required": false },
+        "pageSuccessLimit": { "type": "number", "required": false }
+      }
+    },
+    {
+      "id": "e2e_dry_run_current_account",
+      "name": "当前账号全页 E2E Dry-run 巡检",
+      "dryRunOnly": true,
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/automation/e2e-dry-run"
+      },
+      "parameters": {
+        "dryRun": { "type": "boolean", "default": true },
+        "accountId": { "type": "string", "required": false },
+        "safetyMax": { "type": "number", "required": false },
+        "maxPages": { "type": "number", "required": false }
+      }
+    },
+    {
+      "id": "detect_all_shop_names",
+      "name": "识别全部账号真实店铺名",
+      "dryRun": true,
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/accounts/detect-shops"
+      },
+      "parameters": {
+        "dryRun": { "type": "boolean", "default": false }
+      }
+    }
+  ],
+  "workflows": [
+    {
+      "id": "current_account_safe_reply",
+      "name": "当前账号安全回复流程",
+      "steps": [
+        { "actionId": "detect_all_shop_names", "dryRun": false },
+        { "actionId": "fetch_reviews_current_account", "dryRun": false },
+        { "actionId": "reply_good_reviews_current_account" }
+      ]
+    },
+    {
+      "id": "all_accounts_safe_reply",
+      "name": "全部账号顺序安全回复流程",
+      "steps": [
+        { "actionId": "detect_all_shop_names", "dryRun": false },
+        { "actionId": "reply_good_reviews_all_accounts" }
+      ]
+    },
+    {
+      "id": "acceptance_dry_run",
+      "name": "验收 Dry-run 巡检流程",
+      "steps": [
+        { "actionId": "fetch_reviews_current_account", "dryRun": true },
+        { "actionId": "e2e_dry_run_current_account", "dryRun": true }
+      ]
+    }
+  ],
+  "security": {
+    "manualRequired": [
+      "登录",
+      "验证码",
+      "人机验证",
+      "滑块",
+      "账号安全验证",
+      "平台风控"
+    ],
+    "bypassPolicy": "never"
+  }
+}

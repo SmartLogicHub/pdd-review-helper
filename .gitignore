@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+server/node_modules/
+web/node_modules/
+
+# Build outputs and packaged desktop bundle
+server/dist/
+server/public/
+web/dist/
+dist/
+output/
+
+# Local browser profiles, login state, captured pages, screenshots and runtime data
+browser-data2/
+browser-data/
+runtime-data/
+.playwright-mcp/
+.agents/
+.codex/
+/*.png
+
+# User data and secrets
+settings.json
+reviews.json
+server/data/settings.json
+server/data/reviews.json
+server/data/*.json
+server/data/*.log
+server/data/browser-data*/
+*.env
+*.env.*
+*.local
+*.log
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
