@@ -12,6 +12,7 @@ import {
 
 let client = null;
 let clientKey = '';
+const DEEPSEEK_MODEL = 'deepseek-v4-flash';
 
 function getClient(apiKeyOverride = '') {
   const settings = getSettings();
@@ -56,7 +57,7 @@ ${reviewContent}
 请生成回复：`;
 
   const response = await openai.chat.completions.create({
-    model: 'deepseek-chat',
+    model: DEEPSEEK_MODEL,
     messages: [
       { role: 'system', content: '你是一个专业的拼多多耳机店铺客服，回复风格亲切真诚。' },
       { role: 'user', content: prompt },
@@ -86,7 +87,7 @@ ${neutralTemplates || '感谢您的评价，后续使用中如有任何问题，
 5. 直接输出回复内容，不要加任何解释。`;
 
   const response = await openai.chat.completions.create({
-    model: 'deepseek-chat',
+    model: DEEPSEEK_MODEL,
     messages: [
       { role: 'system', content: '你是一个谨慎的电商客服，只生成保守回复，不夸大、不脑补。' },
       { role: 'user', content: prompt },
@@ -119,7 +120,7 @@ export async function analyzeSentiment(reviewContent, context = {}) {
   const prompt = buildSentimentPrompt(reviewContent, context);
 
   const response = await openai.chat.completions.create({
-    model: 'deepseek-chat',
+    model: DEEPSEEK_MODEL,
     messages: [
       { role: 'system', content: '你是质检助手，只返回严格JSON，不输出Markdown或解释。' },
       { role: 'user', content: prompt },
@@ -158,7 +159,7 @@ ${DEFAULT_SENTIMENT_PROMPT}
 ${content || '(空模板)'}`;
 
   const response = await openai.chat.completions.create({
-    model: 'deepseek-chat',
+    model: DEEPSEEK_MODEL,
     messages: [
       { role: 'system', content: '你是资深提示词工程师，只输出修复后的提示词正文。' },
       { role: 'user', content: prompt },
@@ -175,6 +176,7 @@ ${content || '(空模板)'}`;
 }
 
 export const __testing = {
+  DEEPSEEK_MODEL,
   buildSentimentPrompt: (reviewContent, context = {}) => buildSentimentPrompt(reviewContent, {
     ...context,
     useStoredPrompt: false,
@@ -191,7 +193,7 @@ export async function testConnection(apiKey = '') {
   const openai = getClient(apiKey);
   try {
     const response = await openai.chat.completions.create({
-      model: 'deepseek-chat',
+      model: DEEPSEEK_MODEL,
       messages: [
         { role: 'user', content: '回复 OK' },
       ],
@@ -199,7 +201,7 @@ export async function testConnection(apiKey = '') {
       temperature: 0,
     });
     const text = response.choices[0].message.content.trim();
-    return { ok: true, message: `连接成功 (模型: deepseek-chat)` };
+    return { ok: true, message: `连接成功 (模型: ${DEEPSEEK_MODEL})` };
   } catch (err) {
     const msg = err.message || '';
     if (msg.includes('401') || msg.includes('Authentication')) {

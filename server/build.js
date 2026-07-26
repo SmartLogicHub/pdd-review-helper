@@ -141,9 +141,18 @@ function compileLauncherExe() {
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 
 public static class Launcher
 {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
+
+    private static void ShowError(string message)
+    {
+        MessageBox(IntPtr.Zero, message, "拼多多评价助手", 0x00000010);
+    }
+
     public static int Main()
     {
         string dir = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName);
@@ -151,8 +160,7 @@ public static class Launcher
         string start = Path.Combine(dir, "start.cjs");
         if (!File.Exists(node) || !File.Exists(start))
         {
-            Console.Error.WriteLine("便携包不完整：缺少 node.exe 或 start.cjs");
-            Console.ReadKey();
+            ShowError("便携包不完整：缺少 node.exe 或 start.cjs");
             return 1;
         }
 
@@ -161,6 +169,8 @@ public static class Launcher
         process.StartInfo.Arguments = "\"" + start + "\"";
         process.StartInfo.WorkingDirectory = dir;
         process.StartInfo.UseShellExecute = false;
+        process.StartInfo.CreateNoWindow = true;
+        process.StartInfo.WindowStyle = ProcessWindowStyle.Hidden;
         process.Start();
         process.WaitForExit();
         return process.ExitCode;
@@ -175,7 +185,7 @@ public static class Launcher
     'Add-Type',
     `-Path '${sourceFile.replaceAll("'", "''")}'`,
     `-OutputAssembly '${exeFile.replaceAll("'", "''")}'`,
-    '-OutputType ConsoleApplication',
+    '-OutputType WindowsApplication',
   ].join(' ');
   const result = spawnSync(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], {
     stdio: 'inherit',
