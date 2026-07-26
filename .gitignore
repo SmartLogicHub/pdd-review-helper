@@ -9,6 +9,9 @@ server/public/
 web/dist/
 dist/
 output/
+*.zip
+*.rar
+*.7z
 
 # Local browser profiles, login state, captured pages, screenshots and runtime data
 browser-data2/

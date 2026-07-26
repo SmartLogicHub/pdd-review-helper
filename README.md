@@ -13,6 +13,22 @@
 - Windows 便携文件夹 + 启动 exe 打包
 - `automation-manifest.json` 支持内部自动化任务托管平台接入
 
+## 界面截图
+
+截图均为脱敏展示图，只保留界面结构，不包含真实订单号、用户昵称、评价内容、API Key、Webhook 或登录态。
+
+### 评价运营工作台
+
+![评价运营工作台](docs/screenshots/dashboard.png)
+
+### 评价管理
+
+![评价管理](docs/screenshots/reviews.png)
+
+### 疑似差评人工复核
+
+![疑似差评人工复核](docs/screenshots/risk-modal.png)
+
 ## 项目结构
 
 ```text
