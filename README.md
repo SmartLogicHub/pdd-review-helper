@@ -1,21 +1,32 @@
 # 拼多多评价自动回复助手
 
-一个本地运行的拼多多商家后台评价处理工具，支持多账号顺序处理、DeepSeek 回复生成、情感风险识别、疑似差评同步飞书/企业微信，以及公司内部自动化任务托管平台接入。
+一个本地运行的拼多多商家评价工作台，支持多店铺登录、评价抓取、DeepSeek 回复生成、情感风险识别，以及疑似差评的飞书和企业微信通知。
 
-## 主要功能
+> [!IMPORTANT]
+> 本项目不是拼多多官方产品。请仅在你有权管理的商家账号中使用，并遵守平台规则与当地法律。建议先用 `dryRun` 验证任务范围；登录、验证码、滑块、安全验证和平台风控必须人工处理，程序不会绕过这些机制。
 
-- 当前账号抓取近 30/90/180 天 4/5 星评价
-- 多账号独立登录态、独立评价池、顺序自动回复
-- 明确好评正常回复，中性评价保守回复，疑似差评跳过并同步人工处理
-- 飞书多维表格记录疑似差评，企业微信/飞书群机器人按店铺汇总提醒
-- 情感分析提示词可在界面配置、测试、恢复默认和 AI 优化
-- 本地 Express API + SSE 进度事件
-- Windows 便携文件夹 + 启动 exe 打包
-- `automation-manifest.json` 支持内部自动化任务托管平台接入
+## 工作方式
 
-## 界面截图
+1. 为店铺创建独立账号并完成人工登录；
+2. 抓取当前账号近 30、90 或 180 天的 4/5 星未回复评价；
+3. 结合评价语义判断回复风险；
+4. 明确好评自动生成回复，中性评价采用保守策略；
+5. 疑似差评不自动提交，转入人工复核并按配置发送通知；
+6. 保存执行进度与结果，便于后续检查。
 
-截图均为脱敏展示图，只保留界面结构，不包含真实订单号、用户昵称、评价内容、API Key、Webhook 或登录态。
+## 核心功能
+
+- 多账号独立登录态、独立评价池与顺序处理；
+- DeepSeek 回复生成、提示词测试、恢复默认与 AI 优化；
+- 好评、中性评价和疑似差评的分级处理；
+- 疑似差评写入飞书多维表格，并通过企业微信或飞书群机器人汇总提醒；
+- Express 本地 API 与 SSE 实时进度事件；
+- Windows 便携文件夹构建；
+- 通过 `automation-manifest.json` 接入内部自动化任务托管平台。
+
+## 界面预览
+
+图片均为脱敏示例，不包含真实订单、用户、评价、密钥、Webhook 或登录态。
 
 ### 评价运营工作台
 
@@ -29,147 +40,82 @@
 
 ![疑似差评人工复核](docs/screenshots/risk-modal.png)
 
-## 项目结构
-
-```text
-.
-├── automation-manifest.json       # 自动化托管平台动作声明
-├── server/                        # Express 服务、Playwright 自动化、数据与测试
-│   ├── index.js                   # 服务入口，默认端口 3001
-│   ├── routes/                    # API 路由
-│   ├── services/                  # 自动化、回复、情感识别、外部同步
-│   ├── tests/                     # 后端测试
-│   └── build.js                   # 便携版构建脚本
-├── web/                           # React + Ant Design 前端
-│   └── src/
-└── 好评例子.txt                   # 默认好评模板示例
-```
-
 ## 本地开发
 
-安装后端依赖：
+建议使用 Node.js 22。
 
-```bash
+安装依赖：
+
+```powershell
 cd server
-npm install
+npm ci
+
+cd ..\web
+npm ci
 ```
 
-安装前端依赖：
+分别启动后端与前端：
 
-```bash
-cd web
-npm install
-```
-
-启动后端：
-
-```bash
+```powershell
 cd server
 npm start
-```
 
-开发前端：
-
-```bash
 cd web
 npm run dev
 ```
 
-生产构建：
+后端默认监听 `http://localhost:3001`。生产构建：
 
-```bash
+```powershell
 cd server
 npm run build
 ```
 
-构建完成后，便携版位于：
+便携产物位于 `server/dist`。复制到其他电脑时必须复制整个目录，不能只复制可执行文件。
 
-```text
-server/dist/
-```
+## 自动化托管接口
 
-复制到其他电脑时请复制整个 `server/dist` 文件夹，不要只复制 exe。
+托管平台从仓库根目录读取 [automation-manifest.json](automation-manifest.json)。主要接口：
 
-## 配置与数据
+| 用途 | 请求 |
+| --- | --- |
+| 健康检查 | `GET /api/health` |
+| 任务进度 | `GET /api/automation/events/{jobId}` |
+| 停止任务 | `POST /api/automation/stop/{jobId}` |
 
-API Key、飞书配置、企业微信 Webhook、评价数据和浏览器登录态都写入当前电脑的用户数据目录，不应提交到 GitHub。
+动作包括当前账号抓取、当前账号回复、全部账号回复、端到端演练和店铺名识别。自动回复动作均支持 `dryRun`；执行前请再次确认账号、店铺、时间范围、任务上限和风险评价处理策略。
 
-不要提交这些内容：
+## 项目结构
 
-- `settings.json`
-- `reviews.json`
-- `browser-data*`
-- `server/dist`
-- `node_modules`
-- `.playwright-mcp`
-- 真实 API Key、Webhook、飞书 App Secret
+| 路径 | 用途 |
+| --- | --- |
+| `server` | Express API、Playwright 自动化、数据服务与测试 |
+| `web` | React、Ant Design 和 Vite 前端 |
+| `automation-manifest.json` | 自动化托管平台动作声明 |
+| `好评例子.txt` | 默认好评模板示例 |
 
-## 自动化托管平台接入
+## 测试
 
-托管平台读取根目录：
-
-```text
-automation-manifest.json
-```
-
-健康检查：
-
-```http
-GET http://localhost:3001/api/health
-```
-
-进度事件：
-
-```http
-GET http://localhost:3001/api/automation/events/{jobId}
-```
-
-停止任务：
-
-```http
-POST http://localhost:3001/api/automation/stop/{jobId}
-```
-
-动作入口包括：
-
-- `fetch_reviews_current_account`
-- `reply_good_reviews_current_account`
-- `reply_good_reviews_all_accounts`
-- `e2e_dry_run_current_account`
-- `detect_all_shop_names`
-
-所有自动回复动作都支持 `dryRun`。登录、验证码、滑块、人机验证、账号安全验证和平台风控必须人工处理，程序不会绕过平台安全机制。
-
-## 验证命令
-
-后端测试：
-
-```bash
+```powershell
 cd server
 npm test
-```
 
-前端 lint：
-
-```bash
-cd web
+cd ..\web
 npm run lint
-```
-
-前端构建：
-
-```bash
-cd web
 npm run build
 ```
 
-便携版构建：
+## 数据与安全
 
-```bash
-cd server
-npm run build
-```
+API Key、飞书配置、企业微信 Webhook、评价数据和浏览器登录态只应保存在当前电脑的用户数据目录。以下内容不得提交：
 
-## 安全说明
+- `settings.json`、`reviews.json`；
+- `browser-data*`、`.playwright-mcp`；
+- `node_modules`、`server/dist`；
+- 真实 API Key、Webhook、飞书 App Secret 与登录资料。
 
-建议 GitHub 仓库设为私有仓库。项目包含针对拼多多商家后台的自动化逻辑，虽然源码不包含账号密码和 API Key，但仍属于内部运营工具，不建议公开发布。
+自动化可能因后台页面改版、网络波动或平台限制而失败。提交回复前应核对页面上的店铺、评价、回复内容和提交状态；不能只依据本地日志判断平台操作成功。
+
+## 发布与许可证
+
+仓库当前没有公开 GitHub Release。项目也尚未提供明确的开源许可证；在获得作者授权前，不应默认拥有复制、修改或分发代码的权利。
