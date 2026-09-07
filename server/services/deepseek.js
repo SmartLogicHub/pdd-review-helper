@@ -4,15 +4,21 @@ import {
   DEFAULT_SENTIMENT_PROMPT,
   normalizeSentimentResult,
   parseSentimentResponse,
+  parseSentimentResponseStrict,
   repairSentimentPrompt,
   renderSentimentPrompt,
   sentimentContextFromInput,
   validateSentimentPrompt,
 } from './sentiment-core.js';
+import { requestSentimentWithRetry } from './sentiment-reliability.js';
 
 let client = null;
 let clientKey = '';
 const DEEPSEEK_MODEL = 'deepseek-v4-flash';
+const SENTIMENT_REQUEST_OPTIONS = {
+  temperature: 0.1,
+  max_tokens: 500,
+};
 
 function getClient(apiKeyOverride = '') {
   const settings = getSettings();
@@ -118,23 +124,25 @@ export async function analyzeSentiment(reviewContent, context = {}) {
   const openai = getClient();
 
   const prompt = buildSentimentPrompt(reviewContent, context);
-
-  const response = await openai.chat.completions.create({
-    model: DEEPSEEK_MODEL,
-    messages: [
-      { role: 'system', content: '你是质检助手，只返回严格JSON，不输出Markdown或解释。' },
-      { role: 'user', content: prompt },
-    ],
-    temperature: 0.1,
-    max_tokens: 220,
+  const outcome = await requestSentimentWithRetry({
+    prompt,
+    parse: parseSentimentResponseStrict,
+    request: async effectivePrompt => {
+      const response = await openai.chat.completions.create({
+        model: DEEPSEEK_MODEL,
+        messages: [
+          { role: 'system', content: '你是质检助手，只返回严格JSON，不输出Markdown或解释。' },
+          { role: 'user', content: effectivePrompt },
+        ],
+        ...SENTIMENT_REQUEST_OPTIONS,
+      });
+      return String(response.choices?.[0]?.message?.content || '').trim();
+    },
   });
-
-  const text = response.choices[0].message.content.trim();
-  try {
-    return parseSentimentResponse(text);
-  } catch (e) {
-    return normalizeSentimentResult({ label: 'uncertain_skip', reason: 'AI判断结果不是有效JSON，跳过自动回复' });
-  }
+  return {
+    ...outcome.result,
+    analysisAttempts: outcome.attempts,
+  };
 }
 
 export async function repairSentimentPromptWithAI(content = '') {
@@ -177,6 +185,7 @@ ${content || '(空模板)'}`;
 
 export const __testing = {
   DEEPSEEK_MODEL,
+  sentimentRequestOptions: () => ({ ...SENTIMENT_REQUEST_OPTIONS }),
   buildSentimentPrompt: (reviewContent, context = {}) => buildSentimentPrompt(reviewContent, {
     ...context,
     useStoredPrompt: false,

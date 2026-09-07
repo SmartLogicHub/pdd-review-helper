@@ -349,6 +349,14 @@ function makeLocalReview(review = {}) {
   };
 }
 
+function clearAnalysisFailure(found) {
+  found.analysisFailed = false;
+  found.analysisErrorKind = '';
+  found.analysisError = '';
+  found.analysisAttempts = 0;
+  found.analysisFailedAt = '';
+}
+
 export function markReplied(reviewId, accountId = getCurrentAccount().id) {
   const reviews = getReviews(accountId);
   let found = findReviewForUpdate(reviews, reviewId);
@@ -357,6 +365,7 @@ export function markReplied(reviewId, accountId = getCurrentAccount().id) {
     reviews.unshift(found);
   }
   if (found) {
+    clearAnalysisFailure(found);
     found.replied = true;
     found.replyBlocked = false;
     found.repliedAt = new Date().toISOString();
@@ -374,6 +383,7 @@ export function markReplyBlocked(reviewId, reason = '平台提示不可回复', 
     reviews.unshift(found);
   }
   if (found) {
+    clearAnalysisFailure(found);
     found.replied = false;
     found.replyBlocked = true;
     found.canReview = false;
@@ -394,6 +404,7 @@ export function markReviewFlagged(reviewId, reason = '当前商品存在负面�
     reviews.unshift(found);
   }
   if (found) {
+    clearAnalysisFailure(found);
     const incomingReview = typeof reviewId === 'object' && reviewId ? reviewId : {};
     const riskReason = effectiveFlagReason({ ...found, ...incomingReview }, reason);
     found.replied = false;
@@ -446,6 +457,7 @@ export function markReviewUncertain(reviewId, reason = '评价信息不足，跳
     reviews.unshift(found);
   }
   if (found) {
+    clearAnalysisFailure(found);
     found.replied = false;
     found.flagged = false;
     found.flagReason = '';
@@ -460,6 +472,35 @@ export function markReviewUncertain(reviewId, reason = '评价信息不足，跳
   return found;
 }
 
+export function markReviewAnalysisFailed(reviewId, failure = {}, accountId = getCurrentAccount().id) {
+  const reviews = getReviews(accountId);
+  let found = findReviewForUpdate(reviews, reviewId);
+  if (!found && typeof reviewId === 'object' && reviewId) {
+    found = makeLocalReview(reviewId);
+    reviews.unshift(found);
+  }
+  if (found) {
+    const incoming = typeof reviewId === 'object' && reviewId ? reviewId : {};
+    found.replied = false;
+    found.flagged = false;
+    found.flagReason = '';
+    found.uncertainSkip = false;
+    found.uncertainReason = '';
+    found.neutralReply = false;
+    found.neutralReason = '';
+    found.sentimentLabel = '';
+    found.riskWords = [];
+    found.safePositiveWords = [];
+    found.analysisFailed = true;
+    found.analysisErrorKind = failure.kind || incoming.analysisErrorKind || 'unknown';
+    found.analysisError = failure.error || failure.message || incoming.analysisError || 'AI分析失败，等待重新分析';
+    found.analysisAttempts = Number(failure.attempts || incoming.analysisAttempts || 1);
+    found.analysisFailedAt = new Date().toISOString();
+    saveReviews(reviews, accountId);
+  }
+  return found;
+}
+
 export function markReviewNeutral(reviewId, reason = '中性评价，使用保守回复', accountId = getCurrentAccount().id) {
   const reviews = getReviews(accountId);
   let found = findReviewForUpdate(reviews, reviewId);
@@ -468,6 +509,7 @@ export function markReviewNeutral(reviewId, reason = '中性评价，使用保�
     reviews.unshift(found);
   }
   if (found) {
+    clearAnalysisFailure(found);
     found.replied = false;
     found.flagged = false;
     found.flagReason = '';
@@ -581,6 +623,7 @@ function emptyStats() {
     flagged: 0,
     blocked: 0,
     uncertain: 0,
+    analysisFailed: 0,
   };
 }
 

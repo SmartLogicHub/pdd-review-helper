@@ -2,6 +2,19 @@ const SECONDS_PER_DAY = 24 * 60 * 60;
 const DEFAULT_GOOD_REVIEW_DAYS = 90;
 const GOOD_REVIEW_DAY_OPTIONS = new Set([30, 90, 180]);
 export const PDD_REVIEW_DISPLAY_LIMIT = 2000;
+const LEGACY_ANALYSIS_FAILURE_REASONS = new Set([
+  'AI判断结果不是有效JSON，跳过自动回复',
+  'AI情感分析失败，跳过自动回复',
+]);
+
+export function isSentimentAnalysisFailure(review = {}) {
+  if (review.analysisFailed === true) return true;
+  return LEGACY_ANALYSIS_FAILURE_REASONS.has(String(review.uncertainReason || '').trim());
+}
+
+export function shouldStopReplyRunForAnalysisFailure(review = {}) {
+  return review.analysisFailed === true;
+}
 
 export function normalizeReviewDays(value) {
   const days = Number(value);
@@ -112,6 +125,9 @@ export function shouldAutoReplyReview(review = {}) {
   if (isReviewAlreadyReplied(review)) {
     return { ok: false, reason: '评价已回复' };
   }
+  if (isSentimentAnalysisFailure(review)) {
+    return { ok: false, reason: review.analysisError || 'AI分析失败，等待重新分析' };
+  }
   if (!isUnrepliedStatus(review.replyStatus)) {
     return { ok: false, reason: 'replyStatus 不是未回复' };
   }
@@ -177,8 +193,9 @@ export function isLocallyPendingReview(review = {}) {
 
 export function classifyReviewStatus(review = {}) {
   if (isReviewAlreadyReplied(review)) return 'replied';
-  if (review.flagged) return 'flagged';
   if (review.replyBlocked || review.canReview === false || review.canInteract === false) return 'blocked';
+  if (isSentimentAnalysisFailure(review)) return 'analysis_failed';
+  if (review.flagged) return 'flagged';
   if (review.uncertainSkip) return 'uncertain';
   if (!isUnrepliedStatus(review.replyStatus)) return 'blocked';
   if (review.neutralReply || review.sentimentLabel === 'neutral_auto_reply') return 'neutral';
@@ -209,7 +226,7 @@ export function normalizeReviewStatusFilter({
   if (replied === 'true') return 'replied';
   if (replied === 'false') return 'pending';
   const normalized = String(status || 'all').toLowerCase();
-  return ['all', 'pending', 'neutral', 'replied', 'flagged', 'blocked', 'uncertain'].includes(normalized)
+  return ['all', 'pending', 'neutral', 'replied', 'flagged', 'blocked', 'uncertain', 'analysis_failed'].includes(normalized)
     ? normalized
     : 'all';
 }
@@ -221,11 +238,12 @@ export function summarizeReviewRecords(reviews = []) {
   const flagged = statuses.filter(status => status === 'flagged').length;
   const blocked = statuses.filter(status => status === 'blocked').length;
   const uncertain = statuses.filter(status => status === 'uncertain').length;
+  const analysisFailed = statuses.filter(status => status === 'analysis_failed').length;
   const pending = statuses.filter(status => status === 'pending').length;
   const neutral = statuses.filter(status => status === 'neutral').length;
   const actionable = pending + neutral;
   const unreplied = actionable;
-  return { total, replied, unreplied, pending, neutral, actionable, flagged, blocked, uncertain };
+  return { total, replied, unreplied, pending, neutral, actionable, flagged, blocked, uncertain, analysisFailed };
 }
 
 const REPLY_BLOCKED_MESSAGE_PATTERN = /不可评论|不支持回复|暂不支持回复|不能回复|无法回复|评价已关闭|评论已关闭|已设置为不可评论/;
@@ -291,6 +309,7 @@ export function createReplyRunReport({
     skippedAlreadyReplied: 0,
     skippedFlagged: 0,
     skippedUncertain: 0,
+    skippedAnalysisFailed: 0,
     skippedBlocked: 0,
     firstFailure: null,
     requestBody,
@@ -367,6 +386,7 @@ export function replyRunProgressFields(report = {}) {
     skippedAlreadyReplied: Number(report.skippedAlreadyReplied || 0),
     skippedFlagged: Number(report.skippedFlagged || 0),
     skippedUncertain: Number(report.skippedUncertain || 0),
+    skippedAnalysisFailed: Number(report.skippedAnalysisFailed || 0),
     skippedBlocked: Number(report.skippedBlocked || 0),
     failed: Number(report.failed || 0),
     replyable: Number(report.replyable || 0),
@@ -416,6 +436,7 @@ export function recordReplyRunOutcome(report, {
     const reviewStatus = classifyReviewStatus(review);
     if (reviewStatus === 'flagged') report.skippedFlagged += 1;
     if (reviewStatus === 'uncertain') report.skippedUncertain += 1;
+    if (reviewStatus === 'analysis_failed') report.skippedAnalysisFailed += 1;
     if (reviewStatus === 'blocked') report.skippedBlocked += 1;
     refreshReplyRunTotals(report);
     return record;
@@ -504,6 +525,11 @@ export function mergeReviewRecords(existing = [], incoming = []) {
       neutralReply: Boolean(review.neutralReply ?? old?.neutralReply),
       neutralReason: review.neutralReason ?? old?.neutralReason ?? '',
       sentimentLabel: review.sentimentLabel ?? old?.sentimentLabel ?? '',
+      analysisFailed: Boolean(review.analysisFailed ?? old?.analysisFailed),
+      analysisErrorKind: review.analysisErrorKind ?? old?.analysisErrorKind ?? '',
+      analysisError: review.analysisError ?? old?.analysisError ?? '',
+      analysisAttempts: Number(review.analysisAttempts ?? old?.analysisAttempts ?? 0),
+      analysisFailedAt: review.analysisFailedAt ?? old?.analysisFailedAt ?? '',
       riskWords: review.riskWords ?? old?.riskWords ?? [],
       safePositiveWords: review.safePositiveWords ?? old?.safePositiveWords ?? [],
     });

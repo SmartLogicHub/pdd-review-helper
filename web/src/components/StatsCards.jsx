@@ -1,5 +1,5 @@
 import { Row, Col, Card, Typography } from 'antd';
-import { MessageOutlined, CheckCircleOutlined, StarOutlined, WarningOutlined, StopOutlined, QuestionCircleOutlined, CommentOutlined } from '@ant-design/icons';
+import { MessageOutlined, CheckCircleOutlined, StarOutlined, WarningOutlined, StopOutlined, QuestionCircleOutlined, CommentOutlined, SyncOutlined } from '@ant-design/icons';
 
 const { Text } = Typography;
 
@@ -66,6 +66,15 @@ export default function StatsCards({ stats, onFlaggedClick }) {
       icon: <QuestionCircleOutlined />,
       color: '#5E83F6',
       bg: '#EEF3FF',
+      clickable: false,
+    },
+    {
+      title: 'AI分析失败',
+      hint: '技术故障，已安全阻断，可重新分析',
+      value: stats?.analysisFailed ?? 0,
+      icon: <SyncOutlined />,
+      color: '#E26A3F',
+      bg: '#FFF0E8',
       clickable: false,
     },
   ];

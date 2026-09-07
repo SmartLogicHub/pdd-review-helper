@@ -666,7 +666,7 @@ export default function Settings() {
         styles={{ header: { borderBottom: '1px solid #F0EAF7' } }}
       >
         <Paragraph style={{ color: '#726C83', fontSize: 13, marginBottom: 12 }}>
-          这里控制“疑似差评 / 中性 / 明确好评”的判断逻辑。提示词改坏时不会覆盖当前可用版本，模型输出异常也会按无法判断跳过。
+          这里控制“疑似差评 / 中性 / 明确好评”的判断逻辑。临时 API 或模型输出异常会自动重试，最终失败会单独标记为“AI分析失败”并禁止自动回复。
         </Paragraph>
 
         {sentimentIssues.length > 0 && (

@@ -17,6 +17,7 @@ const {
   getReviews,
   getStats,
   markExternalRiskSync,
+  markReviewAnalysisFailed,
   markReviewFlagged,
   markReviewNeutral,
   markReviewUncertain,
@@ -98,6 +99,45 @@ test('marks flagged and uncertain reviews in the local pool without mixing their
   assert.equal(stats.flagged, 1);
   assert.equal(stats.uncertain, 1);
   assert.equal(stats.unreplied, 0);
+});
+
+test('stores AI technical failures without stale semantic sentiment state', () => {
+  const accountId = 'analysis_failure_case';
+  addReviewsWithStats([{
+    id: 'failed-r1',
+    reviewId: 'failed-r1',
+    content: '挺好的',
+    stars: 5,
+    replied: false,
+    canReview: true,
+    canInteract: true,
+    replyStatus: 2,
+    flagged: true,
+    flagReason: '旧风险',
+    uncertainSkip: true,
+    uncertainReason: '旧无法判断',
+    neutralReply: true,
+    neutralReason: '旧中性',
+    sentimentLabel: 'risk_manual_review',
+  }], accountId);
+
+  markReviewAnalysisFailed({ reviewId: 'failed-r1' }, {
+    kind: 'rate_limited',
+    error: 'DeepSeek 请求过于频繁',
+    attempts: 3,
+  }, accountId);
+
+  const review = getReviews(accountId).find(item => item.reviewId === 'failed-r1');
+  const stats = getStats(accountId);
+  assert.equal(review.analysisFailed, true);
+  assert.equal(review.analysisErrorKind, 'rate_limited');
+  assert.equal(review.analysisAttempts, 3);
+  assert.equal(review.flagged, false);
+  assert.equal(review.uncertainSkip, false);
+  assert.equal(review.neutralReply, false);
+  assert.equal(review.sentimentLabel, '');
+  assert.equal(stats.analysisFailed, 1);
+  assert.equal(stats.uncertain, 0);
 });
 
 test('stores external risk sync status on the flagged review', () => {

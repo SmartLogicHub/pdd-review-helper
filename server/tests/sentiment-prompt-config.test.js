@@ -21,6 +21,7 @@ const {
   DEFAULT_SENTIMENT_PROMPT,
   normalizeSentimentResult,
   parseSentimentResponse,
+  parseSentimentResponseStrict,
   reanalyzeStoredReviews,
   repairSentimentPrompt,
   renderSentimentPrompt,
@@ -95,6 +96,27 @@ test('invalid or incomplete sentiment model output becomes uncertain_skip', () =
   assert.equal(normalizeSentimentResult({ label: 'positive_auto_reply' }).label, 'uncertain_skip');
 });
 
+test('strict sentiment parsing keeps semantic uncertainty separate from technical output failures', () => {
+  const validUncertain = JSON.stringify({
+    label: 'uncertain_skip',
+    can_auto_reply: false,
+    is_real_negative: false,
+    reason: '上下文不足，无法安全判断',
+    risk_words: [],
+    safe_positive_words: [],
+  });
+
+  assert.equal(parseSentimentResponseStrict(validUncertain).label, 'uncertain_skip');
+  assert.throws(
+    () => parseSentimentResponseStrict('不是 JSON'),
+    error => error?.kind === 'invalid_json'
+  );
+  assert.throws(
+    () => parseSentimentResponseStrict('{"label":"bad"}'),
+    error => error?.kind === 'invalid_schema'
+  );
+});
+
 test('reanalyze preview and apply update only mutable unreplied review statuses', async () => {
   const accountId = 'reanalyze-account';
   addReviewsWithStats([
@@ -102,6 +124,7 @@ test('reanalyze preview and apply update only mutable unreplied review statuses'
     { reviewId: 'risk-1', id: 'risk-1', content: '音质很好，就是漏音', stars: 5, replied: false, canReview: true, canInteract: true, replyStatus: 2 },
     { reviewId: 'done-1', id: 'done-1', content: '已回复不应修改', stars: 5, replied: true },
     { reviewId: 'blocked-1', id: 'blocked-1', content: '不可回复不应修改', stars: 5, replied: false, replyBlocked: true },
+    { reviewId: 'failed-1', id: 'failed-1', content: '非常满意', stars: 5, replied: false, canReview: true, canInteract: true, replyStatus: 2, analysisFailed: true, analysisErrorKind: 'network', analysisError: '网络失败', analysisAttempts: 3 },
   ], accountId);
 
   const analyzer = async (review) => {
@@ -115,6 +138,16 @@ test('reanalyze preview and apply update only mutable unreplied review statuses'
         safe_positive_words: ['无杂音'],
       });
     }
+    if (review.reviewId === 'failed-1') {
+      return normalizeSentimentResult({
+        label: 'positive_auto_reply',
+        can_auto_reply: true,
+        is_real_negative: false,
+        reason: '明确正面',
+        risk_words: [],
+        safe_positive_words: ['满意'],
+      });
+    }
     return normalizeSentimentResult({
       label: 'risk_manual_review',
       can_auto_reply: false,
@@ -126,22 +159,24 @@ test('reanalyze preview and apply update only mutable unreplied review statuses'
   };
 
   const preview = await reanalyzeStoredReviews({ accountId, apply: false, analyzer });
-  assert.equal(preview.scanned, 2);
-  assert.equal(preview.changed, 2);
+  assert.equal(preview.scanned, 3);
+  assert.equal(preview.changed, 3);
   assert.equal(preview.transitions['flagged->pending'], 1);
   assert.equal(preview.transitions['pending->flagged'], 1);
+  assert.equal(preview.transitions['analysis_failed->pending'], 1);
 
   const beforeApply = getReviews(accountId);
   assert.equal(beforeApply.find(review => review.reviewId === 'safe-1').flagged, true);
 
   const applied = await reanalyzeStoredReviews({ accountId, apply: true, analyzer });
-  assert.equal(applied.changed, 2);
+  assert.equal(applied.changed, 3);
 
   const reviews = getReviews(accountId);
   const safe = reviews.find(review => review.reviewId === 'safe-1');
   const risk = reviews.find(review => review.reviewId === 'risk-1');
   const done = reviews.find(review => review.reviewId === 'done-1');
   const blocked = reviews.find(review => review.reviewId === 'blocked-1');
+  const recovered = reviews.find(review => review.reviewId === 'failed-1');
 
   assert.equal(safe.flagged, false);
   assert.equal(safe.sentimentLabel, 'positive_auto_reply');
@@ -151,4 +186,43 @@ test('reanalyze preview and apply update only mutable unreplied review statuses'
   assert.deepEqual(risk.riskWords, ['漏音']);
   assert.equal(done.replied, true);
   assert.equal(blocked.replyBlocked, true);
+  assert.equal(recovered.analysisFailed, false);
+  assert.equal(recovered.analysisErrorKind, '');
+  assert.equal(recovered.analysisError, '');
+  assert.equal(recovered.sentimentLabel, 'positive_auto_reply');
+});
+
+test('reanalyze keeps exhausted technical failures blocked instead of converting them to semantic uncertainty', async () => {
+  const accountId = 'reanalyze-still-failing-account';
+  addReviewsWithStats([{
+    reviewId: 'failed-again',
+    id: 'failed-again',
+    content: '评价内容',
+    stars: 5,
+    replied: false,
+    canReview: true,
+    canInteract: true,
+    replyStatus: 2,
+  }], accountId);
+
+  const result = await reanalyzeStoredReviews({
+    accountId,
+    apply: true,
+    analyzer: async () => ({
+      label: '',
+      analysisFailed: true,
+      analysisErrorKind: 'network',
+      analysisError: 'DeepSeek 网络请求超时或中断',
+      analysisAttempts: 3,
+      canAutoReply: false,
+      uncertain: false,
+      flagged: false,
+    }),
+  });
+
+  const review = getReviews(accountId)[0];
+  assert.equal(result.failed, 1);
+  assert.equal(review.analysisFailed, true);
+  assert.equal(review.uncertainSkip, false);
+  assert.equal(review.sentimentLabel, '');
 });

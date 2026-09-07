@@ -42,6 +42,7 @@ function reviewStatus(record = {}) {
   if (record.replied) return 'replied';
   if (record.flagged) return 'flagged';
   if (record.replyBlocked || record.canReview === false || record.canInteract === false) return 'blocked';
+  if (record.analysisFailed || /AI(?:判断结果不是有效JSON|情感分析失败)/.test(record.uncertainReason || '')) return 'analysis_failed';
   if (record.uncertainSkip) return 'uncertain';
   if (record.neutralReply || record.sentimentLabel === 'neutral_auto_reply') return 'neutral';
   return 'pending';
@@ -82,6 +83,13 @@ function StatusTag({ record }) {
       </Tooltip>
     );
   }
+  if (status === 'analysis_failed') {
+    return (
+      <Tooltip title={`${record.analysisError || record.uncertainReason || 'AI分析失败，等待重新分析'}；请到系统设置重新分析`}>
+        <Tag color="volcano" icon={<SyncOutlined />}>AI分析失败</Tag>
+      </Tooltip>
+    );
+  }
   if (status === 'neutral') {
     return (
       <Tooltip title={record.neutralReason || '中性评价，使用保守回复'}>
@@ -111,7 +119,7 @@ function shopStatusText(account = {}) {
 }
 
 export default function Dashboard() {
-  const [stats, setStats] = useState({ total: 0, replied: 0, unreplied: 0, pending: 0, neutral: 0, actionable: 0, flagged: 0, blocked: 0, uncertain: 0 });
+  const [stats, setStats] = useState({ total: 0, replied: 0, unreplied: 0, pending: 0, neutral: 0, actionable: 0, flagged: 0, blocked: 0, uncertain: 0, analysisFailed: 0 });
   const [settings, setSettings] = useState({ autoReplyEnabled: false, aiReplyEnabled: false, reviewDays: 90 });
   const [accountsState, setAccountsState] = useState({ currentAccountId: 'default', accounts: [] });
   const [accountsSummary, setAccountsSummary] = useState({ currentAccountId: 'default', accounts: [], totals: {} });
@@ -701,6 +709,7 @@ export default function Dashboard() {
             <span className="stat-pill">疑似差评 {stats.flagged || 0}</span>
             {(stats.blocked || 0) > 0 && <span className="stat-pill">不可回复 {stats.blocked || 0}</span>}
             {(stats.uncertain || 0) > 0 && <span className="stat-pill">无法判断 {stats.uncertain || 0}</span>}
+            {(stats.analysisFailed || 0) > 0 && <span className="stat-pill">AI分析失败 {stats.analysisFailed || 0}</span>}
           </Space>
         </div>
         <div className="toolbar-actions">
@@ -912,6 +921,12 @@ export default function Dashboard() {
               key: 'uncertain',
               width: 102,
               render: (_, account) => account.stats?.uncertain || 0,
+            },
+            {
+              title: 'AI分析失败',
+              key: 'analysisFailed',
+              width: 112,
+              render: (_, account) => account.stats?.analysisFailed || 0,
             },
             {
               title: '不可回复',

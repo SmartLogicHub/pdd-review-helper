@@ -3,6 +3,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { generateReply, generateNeutralReply, analyzeSentiment as askLLM } from './deepseek.js';
 import { getNeutralTemplates, getSettings, getTemplates } from '../data/store.js';
+import { classifySentimentError } from './sentiment-reliability.js';
 
 // 缓存话术
 let templatesCache = null;
@@ -117,6 +118,30 @@ function sentimentResult(label, reason = '', riskWords = [], safePositiveWords =
   };
 }
 
+export function sentimentAnalysisFailureResult(error = {}) {
+  const classified = classifySentimentError(error);
+  const reason = error?.message || classified.publicMessage || 'AI情感分析失败';
+  return {
+    label: '',
+    canAutoReply: false,
+    can_auto_reply: false,
+    isRealNegative: false,
+    is_real_negative: false,
+    flagged: false,
+    uncertain: false,
+    neutral: false,
+    reason,
+    riskWords: [],
+    risk_words: [],
+    safePositiveWords: [],
+    safe_positive_words: [],
+    analysisFailed: true,
+    analysisErrorKind: error?.kind || classified.kind,
+    analysisError: reason,
+    analysisAttempts: Number(error?.attempts || 1),
+  };
+}
+
 function collectMatches(text, patterns) {
   const matches = [];
   for (const pattern of patterns) {
@@ -192,8 +217,9 @@ export async function analyzeSentiment(reviewContent, stars, context = {}) {
     try {
       return await askLLM(reviewContent, { ...context, stars });
     } catch (err) {
-      console.log('  情感分析失败，按无法判断跳过:', err.message);
-      return sentimentResult('uncertain_skip', 'AI情感分析失败，跳过自动回复');
+      const failure = sentimentAnalysisFailureResult(err);
+      console.log(`  情感分析失败，等待重新分析 [${failure.analysisErrorKind}]: ${failure.analysisError}`);
+      return failure;
     }
   }
 

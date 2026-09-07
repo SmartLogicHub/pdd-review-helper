@@ -13,6 +13,13 @@ test('uses the current DeepSeek V4 flash model instead of deprecated aliases', (
   assert.equal(deepseekTesting.DEEPSEEK_MODEL, 'deepseek-v4-flash');
 });
 
+test('sentiment requests reserve enough output tokens for complete strict JSON', () => {
+  assert.deepEqual(deepseekTesting.sentimentRequestOptions(), {
+    temperature: 0.1,
+    max_tokens: 500,
+  });
+});
+
 test('portable exe launcher is built without a visible console window', () => {
   const source = readFileSync(buildScript, 'utf8');
 

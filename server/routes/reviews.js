@@ -26,6 +26,21 @@ export function normalizeFetchMaxPages(value, fallback = DEFAULT_FETCH_MAX_PAGES
   return Number.isFinite(pages) && pages > 0 ? Math.floor(pages) : fallback;
 }
 
+export function reviewStatsPayload(result = {}) {
+  return {
+    total: Number(result.total || 0),
+    replied: Number(result.replied || 0),
+    unreplied: Number(result.unreplied || 0),
+    pending: Number(result.pending || 0),
+    neutral: Number(result.neutral || 0),
+    actionable: Number(result.actionable || 0),
+    flagged: Number(result.flagged || 0),
+    blocked: Number(result.blocked || 0),
+    uncertain: Number(result.uncertain || 0),
+    analysisFailed: Number(result.analysisFailed || 0),
+  };
+}
+
 router.get('/stats', (req, res) => {
   res.json(getStats(req.query.accountId));
 });
@@ -74,15 +89,7 @@ router.post('/fetch', async (req, res) => {
       success: true,
       fetchedCount: result.fetchedCount,
       newCount: result.newCount,
-      total: result.total,
-      replied: result.replied,
-      unreplied: result.unreplied,
-      pending: result.pending,
-      neutral: result.neutral,
-      actionable: result.actionable,
-      flagged: result.flagged,
-      blocked: result.blocked,
-      uncertain: result.uncertain,
+      ...reviewStatsPayload(result),
     });
   } catch (err) {
     sendAutomationError(res, err);

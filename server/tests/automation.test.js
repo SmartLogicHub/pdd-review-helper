@@ -200,6 +200,27 @@ test('passes skipped risk and uncertain callbacks into the runner so local statu
   assert.deepEqual(uncertain, [['r-uncertain', '评价信息不足，跳过自动回复']]);
 });
 
+test('passes AI analysis failures through a dedicated persistence callback', async () => {
+  const failures = [];
+  const manager = createAutomationManager({
+    getSettings: () => ({ autoReplyEnabled: true }),
+    markReviewAnalysisFailed: (review, failure) => failures.push([review.reviewId, failure.kind, failure.attempts]),
+    runner: async (_genReply, _onProgress, options) => {
+      options.onReviewAnalysisFailed({ reviewId: 'r-ai-failed' }, {
+        kind: 'rate_limited',
+        error: 'DeepSeek 请求过于频繁',
+        attempts: 3,
+      });
+      return { total: 1, success: 0, failed: 0, skipped: 1 };
+    },
+  });
+
+  const job = manager.startReplyGoodReviews();
+  await manager.waitForJob(job.id);
+
+  assert.deepEqual(failures, [['r-ai-failed', 'rate_limited', 3]]);
+});
+
 test('passes neutral callback into the runner so conservative reply targets can update', async () => {
   const neutral = [];
   const manager = createAutomationManager({

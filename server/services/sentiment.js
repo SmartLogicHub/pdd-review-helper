@@ -9,6 +9,7 @@ import {
   DEFAULT_SENTIMENT_PROMPT,
   normalizeSentimentResult,
   parseSentimentResponse,
+  parseSentimentResponseStrict,
   repairSentimentPrompt,
   renderSentimentPrompt,
   sentimentContextFromInput,
@@ -20,6 +21,7 @@ export {
   DEFAULT_SENTIMENT_PROMPT,
   normalizeSentimentResult,
   parseSentimentResponse,
+  parseSentimentResponseStrict,
   repairSentimentPrompt,
   renderSentimentPrompt,
   sentimentContextFromInput,
@@ -39,6 +41,11 @@ function resultPatch(result = {}) {
     sentimentLabel: label,
     riskWords: result.riskWords || result.risk_words || [],
     safePositiveWords: result.safePositiveWords || result.safe_positive_words || [],
+    analysisFailed: false,
+    analysisErrorKind: '',
+    analysisError: '',
+    analysisAttempts: Number(result.analysisAttempts || 0),
+    analysisFailedAt: '',
   };
   if (label === 'risk_manual_review') {
     return {
@@ -85,6 +92,25 @@ function resultPatch(result = {}) {
     uncertainReason: '',
     neutralReply: false,
     neutralReason: '',
+  };
+}
+
+function analysisFailurePatch(result = {}) {
+  return {
+    flagged: false,
+    flagReason: '',
+    uncertainSkip: false,
+    uncertainReason: '',
+    neutralReply: false,
+    neutralReason: '',
+    sentimentLabel: '',
+    riskWords: [],
+    safePositiveWords: [],
+    analysisFailed: true,
+    analysisErrorKind: result.analysisErrorKind || 'unknown',
+    analysisError: result.analysisError || result.reason || 'AI分析失败，等待重新分析',
+    analysisAttempts: Number(result.analysisAttempts || 1),
+    analysisFailedAt: new Date().toISOString(),
   };
 }
 
@@ -154,9 +180,15 @@ export async function reanalyzeStoredReviews({
       summary.scanned += 1;
       accountSummary.scanned += 1;
       try {
-        const result = normalizeSentimentResult(await analyzer(review, account));
-        const patch = resultPatch(result);
+        const analyzed = await analyzer(review, account);
+        const technicalFailure = analyzed?.analysisFailed === true;
+        const result = technicalFailure ? analyzed : normalizeSentimentResult(analyzed);
+        const patch = technicalFailure ? analysisFailurePatch(result) : resultPatch(result);
         const afterStatus = classifyAfterPatch(review, patch);
+        if (technicalFailure) {
+          summary.failed += 1;
+          accountSummary.failed += 1;
+        }
         if (beforeStatus !== afterStatus) {
           summary.changed += 1;
           accountSummary.changed += 1;

@@ -20,6 +20,7 @@ import {
   sameReviewIdentity,
   shouldAutoReplyReview,
   shouldContinueReplyRun,
+  shouldStopReplyRunForAnalysisFailure,
   effectiveFlagReason,
   updateReplyRunLiveState,
 } from './review-normalizer.js';
@@ -1412,9 +1413,10 @@ async function locateReviewByFilteredPages(page, review, options = {}) {
   };
 }
 
-async function analyzeAndMark(review) {
+async function analyzeAndMark(review, analyzer = analyzeSentiment) {
   if (review.stars < 4) return review;
-  const sentiment = await analyzeSentiment(review.content, review.stars, {
+  if (!shouldAutoReplyReview(review).ok) return review;
+  const sentiment = await analyzer(review.content, review.stars, {
     productName: review.productName || '',
     userName: review.userName || '',
     shopName: review.shopName || '',
@@ -1430,6 +1432,11 @@ async function analyzeAndMark(review) {
     sentimentLabel: sentiment.label || '',
     riskWords: sentiment.riskWords || sentiment.risk_words || [],
     safePositiveWords: sentiment.safePositiveWords || sentiment.safe_positive_words || [],
+    analysisFailed: Boolean(sentiment.analysisFailed),
+    analysisErrorKind: sentiment.analysisErrorKind || '',
+    analysisError: sentiment.analysisError || '',
+    analysisAttempts: Number(sentiment.analysisAttempts || 0),
+    analysisFailedAt: sentiment.analysisFailed ? new Date().toISOString() : '',
   };
 }
 
@@ -2171,6 +2178,12 @@ export async function replyAll(genReply, onProgress, options = {}) {
           } catch (err) {
             riskSync = { ok: false, status: 'failed', error: err.message || String(err) };
           }
+        } else if (review.analysisFailed) {
+          options.onReviewAnalysisFailed?.(review, {
+            kind: review.analysisErrorKind || 'unknown',
+            error: review.analysisError || decision.reason,
+            attempts: Number(review.analysisAttempts || 1),
+          });
         } else if (review.uncertainSkip) {
           options.onReviewUncertain?.(review, decision.reason);
         }
@@ -2187,6 +2200,9 @@ export async function replyAll(genReply, onProgress, options = {}) {
           reply: decision.reason,
           riskSync,
         });
+        if (shouldStopReplyRunForAnalysisFailure(review)) {
+          throw new Error(`${review.analysisError || decision.reason}；自动回复任务已停止，请检查后重新分析`);
+        }
         continue;
       }
 
@@ -2624,4 +2640,5 @@ export const __testing = {
   requestMatchesGoodReviewFilter,
   requestMatchesGoodReviewOrderSearch,
   reviewListPopupCleanupStage,
+  analyzeAndMark,
 };

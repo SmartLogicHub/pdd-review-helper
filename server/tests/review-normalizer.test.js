@@ -19,6 +19,7 @@ import {
   summarizeReviewRecords,
   updateReplyRunLiveState,
   shouldAutoReplyReview,
+  shouldStopReplyRunForAnalysisFailure,
   shouldContinueReplyRun,
   visibleReviewRows,
   reviewDaysFilterLabel,
@@ -224,6 +225,30 @@ test('classifies local reviews into one shared status vocabulary', () => {
   assert.equal(classifyReviewStatus({ replied: false, canReview: true, canInteract: true, replyStatus: 2 }), 'pending');
 });
 
+test('classifies current and legacy AI technical failures separately and blocks replies', () => {
+  const base = { reviewId: 'r-ai-failed', stars: 5, replied: false, canReview: true, canInteract: true, replyStatus: 2 };
+  const current = { ...base, analysisFailed: true, analysisError: 'DeepSeek 请求过于频繁' };
+  const legacy = { ...base, uncertainSkip: true, uncertainReason: 'AI情感分析失败，跳过自动回复' };
+
+  assert.equal(classifyReviewStatus(current), 'analysis_failed');
+  assert.equal(classifyReviewStatus(legacy), 'analysis_failed');
+  assert.equal(classifyReviewStatus({ ...current, replied: true }), 'replied');
+  assert.equal(shouldAutoReplyReview(current).ok, false);
+  assert.match(shouldAutoReplyReview(current).reason, /AI|重新分析|DeepSeek/);
+  assert.equal(normalizeReviewStatusFilter({ status: 'analysis_failed' }), 'analysis_failed');
+
+  const stats = summarizeReviewRecords([current, legacy, { reviewId: 'semantic', uncertainSkip: true }]);
+  assert.equal(stats.analysisFailed, 2);
+  assert.equal(stats.uncertain, 1);
+  assert.equal(filterReviewRecordsByStatus([current, legacy], 'analysis_failed').length, 2);
+});
+
+test('stops the current batch after retries are exhausted to prevent failure cascades', () => {
+  assert.equal(shouldStopReplyRunForAnalysisFailure({ analysisFailed: true }), true);
+  assert.equal(shouldStopReplyRunForAnalysisFailure({ uncertainSkip: true }), false);
+  assert.equal(shouldStopReplyRunForAnalysisFailure({ flagged: true }), false);
+});
+
 test('filters local reviews by shared status for the reviews API', () => {
   const reviews = [
     { reviewId: 'ready', replied: false, canReview: true, canInteract: true, replyStatus: 2 },
@@ -306,9 +331,11 @@ test('reply run report separates positive, neutral and skipped categories', () =
   recordReplyRunOutcome(report, { review: { reviewId: 'risk-1', flagged: true }, status: 'skip', reason: '疑似差评' });
   recordReplyRunOutcome(report, { review: { reviewId: 'uncertain-1', uncertainSkip: true }, status: 'skip', reason: '无法判断' });
   recordReplyRunOutcome(report, { review: { reviewId: 'blocked-1', replyBlocked: true }, status: 'skip', reason: '不可回复' });
+  recordReplyRunOutcome(report, { review: { reviewId: 'ai-failed-1', analysisFailed: true }, status: 'skip', reason: 'AI分析失败' });
 
   assert.equal(report.positiveReplies, 1);
   assert.equal(report.neutralReplies, 1);
+  assert.equal(report.skippedAnalysisFailed, 1);
   assert.equal(report.skippedFlagged, 1);
   assert.equal(report.skippedUncertain, 1);
   assert.equal(report.skippedBlocked, 1);
@@ -415,6 +442,30 @@ test('merges reviews by reviewId and preserves local replied state', () => {
   assert.equal(merged[0].replied, true);
   assert.equal(merged[0].repliedAt, '2026-06-24T00:00:00.000Z');
   assert.equal(merged[1].id, 'r2');
+});
+
+test('preserves local AI analysis failure state when the platform row is fetched again', () => {
+  const existing = [{
+    id: 'r-ai-failed',
+    reviewId: 'r-ai-failed',
+    content: 'old',
+    analysisFailed: true,
+    analysisErrorKind: 'network',
+    analysisError: 'DeepSeek 网络请求超时或中断',
+    analysisAttempts: 3,
+  }];
+  const incoming = [normalizePddReviewItem({
+    reviewId: 'r-ai-failed',
+    comment: 'new',
+    descScore: 5,
+    replyStatus: 2,
+    canReview: true,
+  })];
+
+  const merged = mergeReviewRecords(existing, incoming);
+  assert.equal(merged[0].analysisFailed, true);
+  assert.equal(merged[0].analysisErrorKind, 'network');
+  assert.equal(merged[0].analysisAttempts, 3);
 });
 
 test('clears stale local replied state when a review reappears as explicitly unreplied', () => {

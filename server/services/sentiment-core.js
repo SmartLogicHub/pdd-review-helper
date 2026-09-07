@@ -73,6 +73,14 @@ function uncertainResult(reason = 'AI判断结果不是有效JSON，跳过自动
   };
 }
 
+export class SentimentOutputError extends Error {
+  constructor(kind, message) {
+    super(message);
+    this.name = 'SentimentOutputError';
+    this.kind = kind;
+  }
+}
+
 export function normalizeSentimentResult(raw = {}) {
   if (!raw || typeof raw !== 'object') return uncertainResult();
   const missingRequired = REQUIRED_RESULT_KEYS.some(key => !Object.hasOwn(raw, key));
@@ -102,11 +110,28 @@ export function normalizeSentimentResult(raw = {}) {
   };
 }
 
-export function parseSentimentResponse(text = '') {
+export function parseSentimentResponseStrict(text = '') {
   const jsonMatch = String(text || '').match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return uncertainResult();
+  if (!jsonMatch) {
+    throw new SentimentOutputError('invalid_json', 'AI判断结果中没有JSON对象');
+  }
+  let raw;
   try {
-    return normalizeSentimentResult(JSON.parse(jsonMatch[0]));
+    raw = JSON.parse(jsonMatch[0]);
+  } catch {
+    throw new SentimentOutputError('invalid_json', 'AI判断结果不是有效JSON');
+  }
+  const missingRequired = REQUIRED_RESULT_KEYS.some(key => !Object.hasOwn(raw, key));
+  const label = String(raw?.label || '').trim();
+  if (missingRequired || !SENTIMENT_LABELS.has(label)) {
+    throw new SentimentOutputError('invalid_schema', 'AI判断结果字段不完整或标签非法');
+  }
+  return normalizeSentimentResult(raw);
+}
+
+export function parseSentimentResponse(text = '') {
+  try {
+    return parseSentimentResponseStrict(text);
   } catch {
     return uncertainResult();
   }

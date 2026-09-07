@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { __testing as deepseekTesting } from '../services/deepseek.js';
-import { detectLocalRiskSentiment } from '../services/reply-strategy.js';
+import { SentimentReliabilityError } from '../services/sentiment-reliability.js';
+import { detectLocalRiskSentiment, sentimentAnalysisFailureResult } from '../services/reply-strategy.js';
+import { __testing as playwrightTesting } from '../services/playwright.js';
 
 test('sentiment prompt explicitly covers sarcasm and mixed praise criticism', () => {
   const prompt = deepseekTesting.buildSentimentPrompt('挺好的，就是声音有点闷');
@@ -82,4 +84,70 @@ test('local sentiment fallback flags current-product risk experiences', () => {
     assert.equal(result.canAutoReply, false, sample);
     assert.equal(result.isRealNegative, true, sample);
   }
+});
+
+test('exhausted AI failures become a separate safe-blocked analysis state', () => {
+  const result = sentimentAnalysisFailureResult(new SentimentReliabilityError({
+    kind: 'rate_limited',
+    message: 'DeepSeek 请求过于频繁',
+    retryable: true,
+    attempts: 3,
+  }));
+
+  assert.equal(result.analysisFailed, true);
+  assert.equal(result.analysisErrorKind, 'rate_limited');
+  assert.equal(result.analysisAttempts, 3);
+  assert.equal(result.canAutoReply, false);
+  assert.equal(result.uncertain, false);
+  assert.equal(result.flagged, false);
+  assert.equal(result.label, '');
+});
+
+test('already replied reviews are rejected before sentiment AI is called', async () => {
+  let analysisCalls = 0;
+  const review = {
+    reviewId: 'already-replied',
+    content: '很好用',
+    stars: 5,
+    replied: true,
+    replyCount: 1,
+    replyStatus: 1,
+  };
+
+  const result = await playwrightTesting.analyzeAndMark(review, async () => {
+    analysisCalls += 1;
+    throw new Error('不应调用');
+  });
+
+  assert.equal(analysisCalls, 0);
+  assert.equal(result.replied, true);
+  assert.equal(result.analysisFailed, undefined);
+});
+
+test('sentiment technical failure metadata is propagated to the live review', async () => {
+  const review = {
+    reviewId: 'ai-failed',
+    content: '很好用',
+    stars: 5,
+    replied: false,
+    canReview: true,
+    canInteract: true,
+    replyStatus: 2,
+  };
+
+  const result = await playwrightTesting.analyzeAndMark(review, async () => ({
+    label: '',
+    flagged: false,
+    uncertain: false,
+    neutral: false,
+    analysisFailed: true,
+    analysisErrorKind: 'network',
+    analysisError: 'DeepSeek 网络请求超时或中断',
+    analysisAttempts: 3,
+  }));
+
+  assert.equal(result.analysisFailed, true);
+  assert.equal(result.analysisErrorKind, 'network');
+  assert.equal(result.analysisAttempts, 3);
+  assert.equal(result.uncertainSkip, false);
 });

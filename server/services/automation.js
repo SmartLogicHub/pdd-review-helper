@@ -6,6 +6,7 @@ import {
   getSettings,
   markReplied,
   markReplyBlocked,
+  markReviewAnalysisFailed,
   markReviewFlagged,
   markReviewNeutral,
   markReviewUncertain,
@@ -27,6 +28,7 @@ export function createAutomationManager({
   markReviewFlagged: markFlagged = markReviewFlagged,
   markReviewNeutral: markNeutral = markReviewNeutral,
   markReviewUncertain: markUncertain = markReviewUncertain,
+  markReviewAnalysisFailed: markAnalysisFailed = markReviewAnalysisFailed,
   detectShopName = async account => account,
   syncRiskReview = syncFlaggedReview,
   notifyRiskSummary = notifyWecomRiskSummary,
@@ -157,6 +159,7 @@ export function createAutomationManager({
       },
       onReviewNeutral: (review, reason) => markNeutral(review, reason, account.id),
       onReviewUncertain: (review, reason) => markUncertain(review, reason, account.id),
+      onReviewAnalysisFailed: (review, failure) => markAnalysisFailed(review, failure, account.id),
     };
   }
 
@@ -286,6 +289,7 @@ export function createAutomationManager({
         skipped: 0,
         skippedFlagged: 0,
         skippedUncertain: 0,
+        skippedAnalysisFailed: 0,
         skippedBlocked: 0,
         stopped: false,
         reviewDays: settings.reviewDays || 90,
@@ -368,6 +372,7 @@ export function createAutomationManager({
           summary.skipped += Number(accountResult?.skipped || 0);
           summary.skippedFlagged += Number(accountResult?.skippedFlagged || 0);
           summary.skippedUncertain += Number(accountResult?.skippedUncertain || 0);
+          summary.skippedAnalysisFailed += Number(accountResult?.skippedAnalysisFailed || 0);
           summary.skippedBlocked += Number(accountResult?.skippedBlocked || 0);
           emit(job, 'progress', {
             status: 'account-done',
