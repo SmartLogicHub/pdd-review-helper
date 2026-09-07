@@ -20,6 +20,7 @@ runtime-data/
 .playwright-mcp/
 .agents/
 .codex/
+.worktrees/
 /*.png
 
 # User data and secrets
