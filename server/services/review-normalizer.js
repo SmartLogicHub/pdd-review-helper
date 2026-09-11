@@ -12,8 +12,14 @@ export function isSentimentAnalysisFailure(review = {}) {
   return LEGACY_ANALYSIS_FAILURE_REASONS.has(String(review.uncertainReason || '').trim());
 }
 
+// 账号级错误：对每条评价都会失败（Key 无效 / 余额不足 / 无权限），继续跑只会把整批评价
+// 全部标记成失败，因此这类错误才整体停止任务、快速暴露配置问题。其余失败（网络、限流、
+// 服务抖动、返回格式错误等）按单条跳过处理，失败评价留待稍后「重新分析」。
+export const FATAL_ANALYSIS_ERROR_KINDS = new Set(['authentication', 'billing', 'permission']);
+
 export function shouldStopReplyRunForAnalysisFailure(review = {}) {
-  return review.analysisFailed === true;
+  return review.analysisFailed === true
+    && FATAL_ANALYSIS_ERROR_KINDS.has(String(review.analysisErrorKind || ''));
 }
 
 export function normalizeReviewDays(value) {

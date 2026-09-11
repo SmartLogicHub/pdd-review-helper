@@ -2201,7 +2201,7 @@ export async function replyAll(genReply, onProgress, options = {}) {
           riskSync,
         });
         if (shouldStopReplyRunForAnalysisFailure(review)) {
-          throw new Error(`${review.analysisError || decision.reason}；自动回复任务已停止，请检查后重新分析`);
+          throw new Error(`${review.analysisError || decision.reason}；该错误对所有评价都会失败，自动回复任务已停止，请修复后重试`);
         }
         continue;
       }

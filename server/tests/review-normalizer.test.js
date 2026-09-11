@@ -243,8 +243,19 @@ test('classifies current and legacy AI technical failures separately and blocks 
   assert.equal(filterReviewRecordsByStatus([current, legacy], 'analysis_failed').length, 2);
 });
 
-test('stops the current batch after retries are exhausted to prevent failure cascades', () => {
-  assert.equal(shouldStopReplyRunForAnalysisFailure({ analysisFailed: true }), true);
+test('only stops the batch on account-level analysis failures, skips transient ones', () => {
+  // 账号级错误：对所有评价都会失败，整体停止
+  assert.equal(shouldStopReplyRunForAnalysisFailure({ analysisFailed: true, analysisErrorKind: 'authentication' }), true);
+  assert.equal(shouldStopReplyRunForAnalysisFailure({ analysisFailed: true, analysisErrorKind: 'billing' }), true);
+  assert.equal(shouldStopReplyRunForAnalysisFailure({ analysisFailed: true, analysisErrorKind: 'permission' }), true);
+  // 瞬时/可恢复错误：跳过该条继续，不整体停止
+  assert.equal(shouldStopReplyRunForAnalysisFailure({ analysisFailed: true, analysisErrorKind: 'network' }), false);
+  assert.equal(shouldStopReplyRunForAnalysisFailure({ analysisFailed: true, analysisErrorKind: 'rate_limited' }), false);
+  assert.equal(shouldStopReplyRunForAnalysisFailure({ analysisFailed: true, analysisErrorKind: 'server' }), false);
+  assert.equal(shouldStopReplyRunForAnalysisFailure({ analysisFailed: true, analysisErrorKind: 'invalid_json' }), false);
+  assert.equal(shouldStopReplyRunForAnalysisFailure({ analysisFailed: true, analysisErrorKind: 'unknown' }), false);
+  assert.equal(shouldStopReplyRunForAnalysisFailure({ analysisFailed: true }), false);
+  // 非分析失败的跳过原因从不触发整体停止
   assert.equal(shouldStopReplyRunForAnalysisFailure({ uncertainSkip: true }), false);
   assert.equal(shouldStopReplyRunForAnalysisFailure({ flagged: true }), false);
 });
