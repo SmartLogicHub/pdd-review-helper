@@ -17,6 +17,7 @@ test('sentiment requests reserve enough output tokens for complete strict JSON',
   assert.deepEqual(deepseekTesting.sentimentRequestOptions(), {
     temperature: 0.1,
     max_tokens: 500,
+    response_format: { type: 'json_object' },
   });
 });
 

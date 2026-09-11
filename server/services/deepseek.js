@@ -18,6 +18,8 @@ const DEEPSEEK_MODEL = 'deepseek-v4-flash';
 const SENTIMENT_REQUEST_OPTIONS = {
   temperature: 0.1,
   max_tokens: 500,
+  // 强制模型返回合法 JSON，避免夹带 Markdown/解释导致解析失败（invalid_json）
+  response_format: { type: 'json_object' },
 };
 
 function getClient(apiKeyOverride = '') {
