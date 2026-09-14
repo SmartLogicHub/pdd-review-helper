@@ -22,6 +22,11 @@ export function __setReplyGeneratorsForTest(overrides = {}) {
 let templatesCache = null;
 let genericTemplates = [];
 let neutralTemplatesCache = null;
+const DEFAULT_POSITIVE_TEMPLATES = [
+  '感谢您的好评！很高兴产品能让您满意，后续使用中如有任何问题，欢迎随时联系我们，祝您生活愉快。',
+  '谢谢您的认可！您的支持是我们继续打磨产品的动力，有任何需要都可以随时找我们，我们会第一时间为您处理。',
+  '非常感谢您的评价！能得到您的喜欢我们很开心，后续有任何使用疑问都可以联系店铺客服，祝您使用愉快。',
+];
 const DEFAULT_NEUTRAL_TEMPLATES = [
   '感谢您的评价，后续使用中如有任何问题，欢迎随时联系我们，我们会及时为您处理。',
   '感谢您的反馈，产品使用过程中如有疑问或需要帮助，可以随时联系我们，祝您生活愉快。',
@@ -38,12 +43,18 @@ function loadTemplates() {
   if (templatesCache) return templatesCache;
   const raw = getTemplates();
   const lines = raw.split('\n').filter(l => l.trim());
-  templatesCache = lines;
+  // 模板文件为空时兜底，否则 genericTemplates[idx] 会取到 undefined，导致空回复
+  templatesCache = lines.length > 0 ? lines : [...DEFAULT_POSITIVE_TEMPLATES];
 
   // 提取通用话术（前几条作为默认模板）
-  genericTemplates = lines.length >= 4
-    ? [lines[0], lines[Math.floor(lines.length/3)], lines[Math.floor(lines.length*2/3)], lines[lines.length-1]]
-    : lines;
+  genericTemplates = templatesCache.length >= 4
+    ? [
+      templatesCache[0],
+      templatesCache[Math.floor(templatesCache.length / 3)],
+      templatesCache[Math.floor(templatesCache.length * 2 / 3)],
+      templatesCache[templatesCache.length - 1],
+    ]
+    : templatesCache;
   return templatesCache;
 }
 

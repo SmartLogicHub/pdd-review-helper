@@ -16,7 +16,9 @@ test('uses the current DeepSeek V4 flash model instead of deprecated aliases', (
 test('sentiment requests reserve enough output tokens for complete strict JSON', () => {
   assert.deepEqual(deepseekTesting.sentimentRequestOptions(), {
     temperature: 0.1,
-    max_tokens: 500,
+    // V4 是思考模型，推理与正文共用 max_tokens；关闭思考并留足预算，避免正文被挤空/截断
+    max_tokens: 1500,
+    reasoning_effort: 'none',
     response_format: { type: 'json_object' },
   });
 });

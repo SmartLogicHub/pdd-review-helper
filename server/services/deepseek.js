@@ -15,12 +15,36 @@ import { requestSentimentWithRetry } from './sentiment-reliability.js';
 let client = null;
 let clientKey = '';
 const DEEPSEEK_MODEL = 'deepseek-v4-flash';
+// V4 系列是思考模型：推理过程与最终回答共用同一份 max_tokens 预算，默认 reasoning_effort='high'
+// 会把预算吃光，导致 content 返回空、finish_reason='length'。本项目的分类/客服回复都属于简单任务，
+// 关闭思考既能把预算全留给正文，也更快更省 token。
+const REASONING_OFF = 'none';
 const SENTIMENT_REQUEST_OPTIONS = {
   temperature: 0.1,
-  max_tokens: 500,
+  max_tokens: 1500,
+  reasoning_effort: REASONING_OFF,
   // 强制模型返回合法 JSON，避免夹带 Markdown/解释导致解析失败（invalid_json）
   response_format: { type: 'json_object' },
 };
+
+/**
+ * 读取 completion 正文，并显式检查 finish_reason。
+ * 空内容/被截断一律抛错，交由上层回退模板或重试，避免静默产出空回复。
+ */
+function readCompletionText(response, label = 'AI') {
+  const choice = response?.choices?.[0] || {};
+  const text = String(choice.message?.content || '').trim();
+  if (text) return text;
+  const finishReason = choice.finish_reason || 'unknown';
+  const error = new Error(
+    finishReason === 'length'
+      ? `${label}生成被 max_tokens 截断，未产出正文（finish_reason=length，可能被推理占满预算）`
+      : `${label}返回空内容（finish_reason=${finishReason}）`
+  );
+  error.kind = 'empty_content';
+  error.finishReason = finishReason;
+  throw error;
+}
 
 function getClient(apiKeyOverride = '') {
   const settings = getSettings();
@@ -71,10 +95,11 @@ ${reviewContent}
       { role: 'user', content: prompt },
     ],
     temperature: 0.7,
-    max_tokens: 300,
+    max_tokens: 1200,
+    reasoning_effort: REASONING_OFF,
   });
 
-  return String(response.choices?.[0]?.message?.content || '').trim();
+  return readCompletionText(response, '好评回复');
 }
 
 export async function generateNeutralReply(reviewContent, neutralTemplates = '') {
@@ -101,10 +126,11 @@ ${neutralTemplates || '感谢您的评价，后续使用中如有任何问题，
       { role: 'user', content: prompt },
     ],
     temperature: 0.35,
-    max_tokens: 160,
+    max_tokens: 800,
+    reasoning_effort: REASONING_OFF,
   });
 
-  return String(response.choices?.[0]?.message?.content || '').trim();
+  return readCompletionText(response, '中性回复');
 }
 
 function buildSentimentPrompt(reviewContent, context = {}) {
@@ -138,7 +164,7 @@ export async function analyzeSentiment(reviewContent, context = {}) {
         ],
         ...SENTIMENT_REQUEST_OPTIONS,
       });
-      return String(response.choices?.[0]?.message?.content || '').trim();
+      return readCompletionText(response, '情感分析');
     },
   });
   return {

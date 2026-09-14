@@ -38,6 +38,15 @@ export function classifySentimentError(error) {
   const safeDetail = sanitizeSentimentError(error);
   const lower = safeDetail.toLowerCase();
 
+  if (error?.kind === 'empty_content') {
+    return {
+      kind: 'empty_content',
+      retryable: true,
+      publicMessage: error?.finishReason === 'length'
+        ? 'AI返回被截断，未产出判断结果'
+        : 'AI返回空内容',
+    };
+  }
   if (error?.kind === 'invalid_json' || error?.kind === 'invalid_schema') {
     return {
       kind: error.kind,
