@@ -38,3 +38,24 @@ test('falls back to neutral templates when neutral AI generation fails', async (
   assert.equal(result.method, 'neutral-template');
   assert.equal(result.reply, '感谢您的反馈，如后续需要帮助欢迎随时联系店铺客服。');
 });
+
+test('falls back to templates when the reply LLM returns an empty string', async () => {
+  const emptyStrategy = await import(`../services/reply-strategy.js?empty-reply-test=${Date.now()}`);
+  emptyStrategy.__setReplyGeneratorsForTest({
+    generateReply: async () => '   ',
+    generateNeutralReply: async () => '',
+  });
+
+  saveSettings({ aiReplyEnabled: true, deepseekApiKey: 'sk-test' });
+  saveTemplates('感谢亲的好评，我们会继续努力提供优质产品和服务！');
+  saveNeutralTemplates('感谢您的评价，后续如有问题欢迎随时联系客服。');
+  emptyStrategy.resetReplyTemplateCache();
+
+  const positive = await emptyStrategy.getReply({ content: '音质很好，非常满意' });
+  assert.equal(positive.method, 'template');
+  assert.ok(positive.reply.trim().length > 0);
+
+  const neutral = await emptyStrategy.getReply({ content: '还行', neutralReply: true });
+  assert.equal(neutral.method, 'neutral-template');
+  assert.ok(neutral.reply.trim().length > 0);
+});

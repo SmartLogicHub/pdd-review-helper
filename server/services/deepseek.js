@@ -74,7 +74,7 @@ ${reviewContent}
     max_tokens: 300,
   });
 
-  return response.choices[0].message.content.trim();
+  return String(response.choices?.[0]?.message?.content || '').trim();
 }
 
 export async function generateNeutralReply(reviewContent, neutralTemplates = '') {
@@ -104,7 +104,7 @@ ${neutralTemplates || '感谢您的评价，后续使用中如有任何问题，
     max_tokens: 160,
   });
 
-  return response.choices[0].message.content.trim();
+  return String(response.choices?.[0]?.message?.content || '').trim();
 }
 
 function buildSentimentPrompt(reviewContent, context = {}) {

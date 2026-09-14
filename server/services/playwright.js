@@ -1906,6 +1906,10 @@ async function submitReplyForReview(page, review, replyText, {
   captureNetwork = false,
 } = {}) {
   const networkProbe = captureNetwork ? createReplyNetworkProbe(page) : null;
+  if (!String(replyText || '').trim()) {
+    // 兜底：回复内容为空绝不提交，避免填入空白回复
+    throw new Error('回复内容为空，已跳过提交');
+  }
   try {
     await openReplyDialogForReview(page, review, { onProgress, stopSignal, preferSingleVisibleResult });
     const fillResult = await fillVisibleReplyTextarea(page, replyText);

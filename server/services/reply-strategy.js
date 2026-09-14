@@ -1,9 +1,22 @@
 import fs from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { generateReply, generateNeutralReply, analyzeSentiment as askLLM } from './deepseek.js';
+import {
+  generateReply as defaultGenerateReply,
+  generateNeutralReply as defaultGenerateNeutralReply,
+  analyzeSentiment as askLLM,
+} from './deepseek.js';
 import { getNeutralTemplates, getSettings, getTemplates } from '../data/store.js';
 import { classifySentimentError } from './sentiment-reliability.js';
+
+// 生成函数默认取 deepseek 实现，测试可通过 __setReplyGeneratorsForTest 注入替身
+let generateReply = defaultGenerateReply;
+let generateNeutralReply = defaultGenerateNeutralReply;
+
+export function __setReplyGeneratorsForTest(overrides = {}) {
+  if (overrides.generateReply) generateReply = overrides.generateReply;
+  if (overrides.generateNeutralReply) generateNeutralReply = overrides.generateNeutralReply;
+}
 
 // 缓存话术
 let templatesCache = null;
@@ -249,8 +262,10 @@ export async function getReply(reviewContent, options = {}) {
     const neutralTemplates = loadNeutralTemplates();
     if (aiEnabled) {
       try {
-        const reply = await generateNeutralReply(content, neutralTemplates.join('\n'));
-        return { reply, method: 'neutral-llm' };
+        const reply = (await generateNeutralReply(content, neutralTemplates.join('\n')) || '').trim();
+        // 空回复视为失败，回退模板，避免把空内容提交上去
+        if (reply) return { reply, method: 'neutral-llm' };
+        console.log('    [getReply] 中性 LLM 返回空内容，回退到保守模板');
       } catch (err) {
         console.log(`    [getReply] 中性 LLM 失败，回退到保守模板: ${err.message}`);
       }
@@ -262,13 +277,15 @@ export async function getReply(reviewContent, options = {}) {
   if (contentResult && aiEnabled) {
     // 有实质内容 → LLM 生成
     try {
-      const reply = await generateReply(content, templatesCache.join('\n'));
-      return { reply, method: 'llm' };
+      const reply = (await generateReply(content, templatesCache.join('\n')) || '').trim();
+      // 空回复视为失败，回退模板，避免把空内容提交上去
+      if (reply) return { reply, method: 'llm' };
+      console.log('    [getReply] LLM 返回空内容，回退到模板');
     } catch (err) {
       console.log(`    [getReply] LLM 失败，回退到模板: ${err.message}`);
-      const idx = Math.floor(Math.random() * genericTemplates.length);
-      return { reply: genericTemplates[idx], method: 'template' };
     }
+    const idx = Math.floor(Math.random() * genericTemplates.length);
+    return { reply: genericTemplates[idx], method: 'template' };
   } else {
     // 无内容 → 随机通用模板
     const idx = Math.floor(Math.random() * genericTemplates.length);
