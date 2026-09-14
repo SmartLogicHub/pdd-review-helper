@@ -496,10 +496,12 @@ function requestMatchesGoodReviewFilter(response) {
   if (response.request().method() !== 'POST') return false;
   try {
     const body = JSON.parse(response.request().postData() || '{}');
-    return body.replyStatus === '2'
-      && Array.isArray(body.descScore)
-      && body.descScore.includes('4')
-      && body.descScore.includes('5');
+    // 拼多多可能把筛选值下发为字符串或数字（返回体已改为数字），统一归一化后再比较，
+    // 否则类型一变匹配器就永远匹配不上，waitForResponse 会静默超时。
+    if (String(body.replyStatus ?? '') !== '2') return false;
+    if (!Array.isArray(body.descScore)) return false;
+    const scores = body.descScore.map(score => String(score));
+    return scores.includes('4') && scores.includes('5');
   } catch {
     return false;
   }
@@ -2142,6 +2144,9 @@ export async function replyAll(genReply, onProgress, options = {}) {
   let pageReviews = firstPage.pageReviews;
   let currentPageNo = 1;
   const skippedKeys = new Set();
+  // 翻页/刷新超时后允许重新加载评价页继续，最多 2 次，避免无限重试
+  const maxListRecoveries = Math.max(0, Number(options.maxListRecoveries ?? 2));
+  let listRecoveries = 0;
   updateReplyRunLiveState(report, {
     totalRows: firstPage.totalRows,
     displayRows: firstPage.displayRows,
@@ -2331,6 +2336,51 @@ export async function replyAll(genReply, onProgress, options = {}) {
         expectedPageSize: pageSize,
       });
     } catch (err) {
+      // 刷新/翻页超时多为风控弹窗或网络抖动，先重新加载评价页继续，不直接中断整批
+      if (listRecoveries < maxListRecoveries && !isStopped(options.stopSignal)) {
+        listRecoveries += 1;
+        emitProgress(onProgress, {
+          ...replyRunProgressFields(report),
+          status: 'retry',
+          stage,
+          reason: `${stage}失败：${err.message}；第 ${listRecoveries} 次重新加载评价页后继续`,
+          paginationDiagnostics: err.paginationDiagnostics || null,
+        });
+        try {
+          await ensureReviewPage(page, {
+            onProgress,
+            stopSignal: options.stopSignal,
+            reviewDays: options.reviewDays,
+          });
+          const recovered = await applyGoodReviewFilters(page, {
+            onProgress,
+            stopSignal: options.stopSignal,
+            reviewDays: options.reviewDays,
+          });
+          currentPageNo = 1;
+          totalPages = reviewPageCountForRows({
+            totalRows: recovered.totalRows,
+            displayRows: recovered.displayRows,
+            pageSize,
+            maxPages: options.maxPages,
+          });
+          pageReviews = recovered.pageReviews;
+          updateReplyRunLiveState(report, {
+            totalRows: recovered.totalRows,
+            displayRows: recovered.displayRows,
+            pageNo: currentPageNo,
+            pageCount: totalPages,
+          });
+          emitProgress(onProgress, {
+            ...replyRunProgressFields(report),
+            status: 'progress',
+            stage: '评价页已重新加载，从第 1 页继续',
+          });
+          continue;
+        } catch (recoverErr) {
+          err.message = `${err.message}；重新加载评价页也失败：${recoverErr.message}`;
+        }
+      }
       const record = recordReplyRunOutcome(report, {
         review: { reviewId: `page-${nextPageNo}`, orderNo: '' },
         status: 'fail',
