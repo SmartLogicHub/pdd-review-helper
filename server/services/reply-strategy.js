@@ -46,15 +46,8 @@ function loadTemplates() {
   // 模板文件为空时兜底，否则 genericTemplates[idx] 会取到 undefined，导致空回复
   templatesCache = lines.length > 0 ? lines : [...DEFAULT_POSITIVE_TEMPLATES];
 
-  // 提取通用话术（前几条作为默认模板）
-  genericTemplates = templatesCache.length >= 4
-    ? [
-      templatesCache[0],
-      templatesCache[Math.floor(templatesCache.length / 3)],
-      templatesCache[Math.floor(templatesCache.length * 2 / 3)],
-      templatesCache[templatesCache.length - 1],
-    ]
-    : templatesCache;
+  // 兜底回复从全部模板里随机选：以前只固定挑 4 条，AI 一失败店铺里就反复出现同样几句话
+  genericTemplates = templatesCache;
   return templatesCache;
 }
 
@@ -268,6 +261,9 @@ export async function getReply(reviewContent, options = {}) {
   );
   const contentResult = hasContent(content);
   const aiEnabled = getSettings().aiReplyEnabled;
+  // 回复按店铺和商品个性化：店铺名来自当前账号，商品标题来自拼多多评价数据里的 goodsName
+  const shopName = String(options.shopName || reviewContent?.shopName || '').trim();
+  const productName = String(reviewContent?.productName || '').trim();
 
   if (isNeutral) {
     const neutralTemplates = loadNeutralTemplates();
@@ -288,7 +284,7 @@ export async function getReply(reviewContent, options = {}) {
   if (contentResult && aiEnabled) {
     // 有实质内容 → LLM 生成
     try {
-      const reply = (await generateReply(content, templatesCache.join('\n')) || '').trim();
+      const reply = (await generateReply(content, templatesCache.join('\n'), { shopName, productName }) || '').trim();
       // 空回复视为失败，回退模板，避免把空内容提交上去
       if (reply) return { reply, method: 'llm' };
       console.log('    [getReply] LLM 返回空内容，回退到模板');

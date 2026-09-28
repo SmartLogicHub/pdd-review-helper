@@ -103,7 +103,13 @@ router.post('/:id/generate', async (req, res) => {
     if (!review) return res.status(404).json({ error: '评价不存在' });
 
     const currentStatus = classifyReviewStatus(review);
-    const result = await getReply(review, { neutral: currentStatus === 'neutral' });
+    const accountsState = getAccountsState();
+    const accountId = req.query.accountId || accountsState.currentAccountId;
+    const account = accountsState.accounts.find(item => item.id === accountId) || {};
+    const result = await getReply(review, {
+      neutral: currentStatus === 'neutral',
+      shopName: account.shopName || '',
+    });
     res.json({ reply: result.reply, method: result.method });
   } catch (err) {
     res.status(500).json({ error: err.message });

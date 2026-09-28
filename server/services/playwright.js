@@ -2170,7 +2170,7 @@ export async function replyAll(genReply, onProgress, options = {}) {
     for (const rawReview of pageReviews) {
       if (!shouldContinueReplyRun(report, totalTarget) || isStopped(options.stopSignal)) break;
 
-      const review = await analyzeAndMark(rawReview);
+      const review = await analyzeAndMark({ ...rawReview, shopName: rawReview.shopName || options.shopName || '' });
       const key = reviewKey(review);
       if (key && skippedKeys.has(key)) continue;
       const decision = shouldAutoReplyReview(review);
@@ -2221,6 +2221,7 @@ export async function replyAll(genReply, onProgress, options = {}) {
         }
         const { reply, method } = await genReply(review, {
           neutral: review.neutralReply || review.sentimentLabel === 'neutral_auto_reply',
+          shopName: options.shopName || '',
         });
         const submitResult = await submitReplyForReview(page, review, reply, {
           dryRun,
@@ -2515,6 +2516,7 @@ export async function e2eDryRunAllPages(genReply, onProgress, options = {}) {
       try {
         replyResult = await genReply(review, {
           neutral: review.neutralReply || review.sentimentLabel === 'neutral_auto_reply',
+          shopName: options.shopName || '',
         });
       } catch (err) {
         pageSummary.failed += 1;

@@ -31,12 +31,62 @@ async function fetchJson(url, { fetchImpl = fetch, timeoutMs = DEFAULT_TIMEOUT_M
     const response = await fetchImpl(url, { ...options, signal: controller.signal });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(payload?.msg || payload?.message || `HTTP ${response.status}`);
+      const error = new Error(payload?.msg || payload?.message || `HTTP ${response.status}`);
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
     }
     return payload;
   } finally {
     clearTimeout(timer);
   }
+}
+
+export const RISK_TABLE_NAME = '拼多多疑似差评';
+export const RISK_TABLE_REQUIRED_FIELDS = ['店铺名称', '订单编号', '星级', '评价内容', '标记原因', '处理状态', '发现时间'];
+const SCHEMA_CACHE_TTL_MS = 10 * 60 * 1000;
+
+// 飞书的业务错误大多是 HTTP 200 + code≠0。不检查 code，「表不存在」之类的失败会被当成「查到 0 条」。
+const FEISHU_ERROR_HINTS = [
+  [/TableIdNotFound/i, `飞书数据表不存在，请在系统设置里重新复制「${RISK_TABLE_NAME}」表的链接`],
+  [/FieldNameNotFound|FieldIdNotFound/i, `飞书表缺少所需字段，当前配置的表可能不是「${RISK_TABLE_NAME}」表`],
+  [/BaseTokenNotFound|WrongBaseToken|AppTokenNotFound|NOTEXIST/i, '飞书多维表格链接无效，请重新复制表格链接'],
+  [/Forbidden|RolePermNotAllow|NoPermission|permission/i, '飞书应用没有这张多维表格的编辑权限，请在多维表格里把应用添加为协作者并授予「可编辑」'],
+  [/app ?secret|app_secret|invalid app|app not exist/i, '飞书 App ID 或 App Secret 无效'],
+];
+
+function feishuError(payload = {}) {
+  const code = payload.code;
+  const msg = String(payload.msg || payload.message || '').trim() || '未知错误';
+  const hint = FEISHU_ERROR_HINTS.find(([pattern]) => pattern.test(msg))?.[1];
+  const error = new Error(hint ? `${hint}（${msg}，code ${code}）` : `飞书接口错误：${msg}（code ${code}）`);
+  error.feishuCode = Number(code);
+  error.feishuMsg = msg;
+  return error;
+}
+
+async function feishuJson(url, options = {}) {
+  let payload;
+  try {
+    payload = await fetchJson(url, options);
+  } catch (err) {
+    if (err.payload?.code !== undefined) throw feishuError(err.payload);
+    throw err;
+  }
+  if (payload?.code !== undefined && Number(payload.code) !== 0) throw feishuError(payload);
+  return payload;
+}
+
+// token 和表结构校验结果按 fetch 实现共享：生产环境里所有客户端共用一份，测试里每个 mock fetch 各自隔离。
+const sharedFeishuCaches = new WeakMap();
+
+function feishuCachesFor(fetchImpl) {
+  let caches = sharedFeishuCaches.get(fetchImpl);
+  if (!caches) {
+    caches = { tokens: new Map(), schemas: new Map() };
+    sharedFeishuCaches.set(fetchImpl, caches);
+  }
+  return caches;
 }
 
 function normalizeFieldValue(value) {
@@ -114,16 +164,22 @@ export function formatWecomRiskSummaryMessage({
   discoveredRiskCount,
   newRiskCount = 0,
   failedCount = 0,
+  failureReason = '',
   pendingCount,
   feishuUrl = '',
 } = {}) {
+  const failed = Number(failedCount || 0);
   const hasPendingCount = Number.isFinite(Number(pendingCount));
   const pendingNumber = hasPendingCount ? Number(pendingCount) : null;
-  const pendingLine = hasPendingCount
-    ? (pendingNumber > 0
-      ? `未处理疑似差评：${pendingNumber} 条，请及时处理。`
-      : '飞书台账暂无未处理疑似差评，本次疑似差评已全部处理完成。')
-    : '飞书未处理疑似差评：未知（飞书汇总查询失败，请打开台账确认）。';
+  let pendingLine = '飞书未处理疑似差评：未知（飞书汇总查询失败，请打开台账确认）。';
+  if (hasPendingCount && pendingNumber > 0) {
+    pendingLine = `未处理疑似差评：${pendingNumber} 条，请及时处理。`;
+  } else if (hasPendingCount && failed > 0) {
+    // 有写入失败时不能说「已全部处理完成」：失败的那些根本没进台账
+    pendingLine = '飞书台账暂无未处理疑似差评，但本次有疑似差评未能写入台账，请检查飞书配置。';
+  } else if (hasPendingCount) {
+    pendingLine = '飞书台账暂无未处理疑似差评，本次疑似差评已全部处理完成。';
+  }
   const hasDiscoveredCount = Number.isFinite(Number(discoveredRiskCount));
   return [
     '拼多多疑似差评待处理汇总',
@@ -131,7 +187,8 @@ export function formatWecomRiskSummaryMessage({
     hasDiscoveredCount ? `本次发现疑似差评：${Number(discoveredRiskCount || 0)} 条` : '',
     `本次新增疑似差评：${Number(newRiskCount || 0)} 条`,
     pendingLine,
-    Number(failedCount || 0) > 0 ? `飞书写入失败：${Number(failedCount)} 条` : '',
+    failed > 0 ? `飞书写入失败：${failed} 条` : '',
+    failed > 0 && failureReason ? `失败原因：${compactText(failureReason, 160)}` : '',
     feishuUrl ? `飞书台账：${feishuUrl}` : '',
   ].filter(Boolean).join('\n');
 }
@@ -142,6 +199,7 @@ export async function notifyWecomRiskSummary({
   discoveredRiskCount = 0,
   newRiskCount = 0,
   failedCount = 0,
+  failureReason = '',
   feishuClient = createFeishuClient(settings),
   wecomClient = createWecomClient(settings),
   feishuBotClient = createFeishuBotClient(settings),
@@ -161,6 +219,7 @@ export async function notifyWecomRiskSummary({
       discoveredRiskCount,
       newRiskCount,
       failedCount,
+      failureReason,
       pendingCount,
       feishuUrl: settings.feishuBitableUrl,
     });
@@ -203,13 +262,14 @@ export async function notifyWecomRiskSummary({
 }
 
 export function createFeishuClient(settings = {}, fetchImpl = fetch) {
-  let cachedToken = null;
-  let cachedTokenExpireAt = 0;
+  const caches = feishuCachesFor(fetchImpl);
 
   async function getTenantAccessToken() {
-    if (cachedToken && Date.now() < cachedTokenExpireAt) return cachedToken;
     requireConfig(settings, ['feishuAppId', 'feishuAppSecret']);
-    const payload = await fetchJson(FEISHU_TOKEN_URL, {
+    const cacheKey = `${settings.feishuAppId}\n${settings.feishuAppSecret}`;
+    const cached = caches.tokens.get(cacheKey);
+    if (cached && Date.now() < cached.expireAt) return cached.token;
+    const payload = await feishuJson(FEISHU_TOKEN_URL, {
       fetchImpl,
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
@@ -220,16 +280,74 @@ export function createFeishuClient(settings = {}, fetchImpl = fetch) {
     });
     const token = payload.tenant_access_token;
     if (!token) throw new Error(payload.msg || '飞书 tenant_access_token 获取失败');
-    cachedToken = token;
-    cachedTokenExpireAt = Date.now() + Math.max(Number(payload.expire || 3600) - 120, 60) * 1000;
-    return cachedToken;
+    caches.tokens.set(cacheKey, {
+      token,
+      expireAt: Date.now() + Math.max(Number(payload.expire || 3600) - 120, 60) * 1000,
+    });
+    return token;
+  }
+
+  function tableUrl(suffix = '') {
+    requireConfig(settings, ['feishuAppToken', 'feishuTableId']);
+    return `${FEISHU_API_BASE}/apps/${encodeURIComponent(settings.feishuAppToken)}/tables/${encodeURIComponent(settings.feishuTableId)}${suffix}`;
+  }
+
+  async function listFieldNames() {
+    const token = await getTenantAccessToken();
+    const names = [];
+    let pageToken = '';
+    for (let page = 0; page < 10; page += 1) {
+      const params = new URLSearchParams({ page_size: '100' });
+      if (pageToken) params.set('page_token', pageToken);
+      const payload = await feishuJson(tableUrl(`/fields?${params}`), {
+        fetchImpl,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      for (const item of payload?.data?.items || []) {
+        if (item?.field_name) names.push(item.field_name);
+      }
+      if (!payload?.data?.has_more) break;
+      pageToken = payload?.data?.page_token || '';
+      if (!pageToken) break;
+    }
+    return names;
+  }
+
+  // 校验表里有没有写入所需的字段。结果缓存 10 分钟：选错表时第一条就失败并说明原因，不再逐条白跑。
+  async function validateRiskTable({ force = false } = {}) {
+    const cacheKey = `${settings.feishuAppToken}:${settings.feishuTableId}`;
+    const cached = caches.schemas.get(cacheKey);
+    if (!force && cached && Date.now() - cached.checkedAt < SCHEMA_CACHE_TTL_MS) return cached.result;
+    let result;
+    try {
+      const fieldNames = await listFieldNames();
+      const missingFields = RISK_TABLE_REQUIRED_FIELDS.filter(name => !fieldNames.includes(name));
+      result = missingFields.length
+        ? {
+          ok: false,
+          fieldNames,
+          missingFields,
+          error: `飞书表缺少字段：${missingFields.join('、')}。当前配置的表可能不是「${RISK_TABLE_NAME}」表，请在系统设置里重新复制正确表格的链接`,
+        }
+        : { ok: true, fieldNames, missingFields: [] };
+    } catch (err) {
+      // 只缓存飞书明确返回的业务错误（表不存在、无权限等）；网络抖动不缓存，下次重试
+      if (err.feishuCode === undefined) throw err;
+      result = { ok: false, fieldNames: [], missingFields: [], error: err.message };
+    }
+    caches.schemas.set(cacheKey, { checkedAt: Date.now(), result });
+    return result;
+  }
+
+  async function ensureRiskTable() {
+    const result = await validateRiskTable();
+    if (!result.ok) throw new Error(result.error);
   }
 
   async function createRecord(fields) {
-    requireConfig(settings, ['feishuAppToken', 'feishuTableId']);
+    await ensureRiskTable();
     const token = await getTenantAccessToken();
-    const url = `${FEISHU_API_BASE}/apps/${encodeURIComponent(settings.feishuAppToken)}/tables/${encodeURIComponent(settings.feishuTableId)}/records`;
-    const payload = await fetchJson(url, {
+    const payload = await feishuJson(tableUrl('/records'), {
       fetchImpl,
       method: 'POST',
       headers: {
@@ -244,15 +362,14 @@ export function createFeishuClient(settings = {}, fetchImpl = fetch) {
   }
 
   async function countPendingRecords() {
-    requireConfig(settings, ['feishuAppToken', 'feishuTableId']);
+    await ensureRiskTable();
     const token = await getTenantAccessToken();
     let pageToken = '';
     let total = 0;
     for (let page = 0; page < 20; page += 1) {
       const params = new URLSearchParams({ page_size: '500' });
       if (pageToken) params.set('page_token', pageToken);
-      const url = `${FEISHU_API_BASE}/apps/${encodeURIComponent(settings.feishuAppToken)}/tables/${encodeURIComponent(settings.feishuTableId)}/records?${params}`;
-      const payload = await fetchJson(url, {
+      const payload = await feishuJson(tableUrl(`/records?${params}`), {
         fetchImpl,
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -265,7 +382,7 @@ export function createFeishuClient(settings = {}, fetchImpl = fetch) {
     return total;
   }
 
-  return { createRecord, countPendingRecords };
+  return { createRecord, countPendingRecords, validateRiskTable };
 }
 
 export function createWecomClient(settings = {}, fetchImpl = fetch) {

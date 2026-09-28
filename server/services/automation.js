@@ -105,15 +105,27 @@ export function createAutomationManager({
     };
   }
 
+  // 同一轮里写入失败通常是同一个原因（比如选错了表），取出现最多的那条放进汇总
+  function topRiskSyncFailure(syncResults = []) {
+    const counts = new Map();
+    for (const result of syncResults) {
+      if (result?.ok || !result?.error) continue;
+      counts.set(result.error, (counts.get(result.error) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+  }
+
   async function flushRiskSummary(settings, account, riskSummary, job) {
     if (!riskSummary || (!settings.wecomEnabled && !settings.feishuBotEnabled)) return null;
     if (riskSummary.discoveredRiskCount + riskSummary.newRiskCount + riskSummary.failedCount <= 0) return null;
+    const failureReason = topRiskSyncFailure(riskSummary.syncResults);
     const result = await notifyRiskSummary({
       account,
       settings,
       discoveredRiskCount: riskSummary.discoveredRiskCount,
       newRiskCount: riskSummary.newRiskCount,
       failedCount: riskSummary.failedCount,
+      failureReason,
     });
     riskSummary.notifyResult = result;
     emit(job, 'progress', {
@@ -124,6 +136,7 @@ export function createAutomationManager({
       discoveredRiskCount: riskSummary.discoveredRiskCount,
       newRiskCount: riskSummary.newRiskCount,
       failedCount: riskSummary.failedCount,
+      failureReason,
       notifyResult: result,
     });
     return result;
@@ -245,6 +258,7 @@ export function createAutomationManager({
         reviewDays: settings.reviewDays || 90,
         accountId: account.id,
         accountName: account.name,
+        shopName: account.shopName || '',
       },
       startedPayload: {
         dryRun: true,

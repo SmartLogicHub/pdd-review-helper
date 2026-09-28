@@ -138,6 +138,10 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ apiKey }),
   }),
+  testFeishu: (values) => request('/settings/test-feishu', {
+    method: 'POST',
+    body: JSON.stringify(values),
+  }),
   getTemplates: () => request('/templates'),
   updateTemplates: (content) => request('/templates', {
     method: 'PUT',

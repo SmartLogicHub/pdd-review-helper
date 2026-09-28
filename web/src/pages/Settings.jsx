@@ -49,6 +49,8 @@ export default function Settings() {
   const [reanalyzing, setReanalyzing] = useState(false);
   const [testingKey, setTestingKey] = useState(false);
   const [keyStatus, setKeyStatus] = useState(null);
+  const [testingFeishu, setTestingFeishu] = useState(false);
+  const [feishuStatus, setFeishuStatus] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -148,6 +150,27 @@ export default function Settings() {
       }
     } catch {
       // 手动保存按钮兜底。
+    }
+  };
+
+  const handleTestFeishu = async () => {
+    const values = form.getFieldsValue(['feishuAppId', 'feishuAppSecret', 'feishuBitableUrl']);
+    if (!String(values.feishuBitableUrl || '').trim()) {
+      message.warning('请先填写飞书多维表格链接');
+      return;
+    }
+    setTestingFeishu(true);
+    setFeishuStatus(null);
+    try {
+      const result = await api.testFeishu(values);
+      setFeishuStatus(result.ok ? 'ok' : 'fail');
+      if (result.ok) message.success(result.message, 4);
+      else message.error(result.message, 8);
+    } catch (err) {
+      setFeishuStatus('fail');
+      message.error('飞书台账检测失败: ' + err.message);
+    } finally {
+      setTestingFeishu(false);
     }
   };
 
@@ -510,6 +533,19 @@ export default function Settings() {
             <Text style={{ color: '#8A8498', display: 'block', fontSize: 12, marginTop: 10 }}>
               飞书字段只需要：店铺名称、订单编号、星级、评价内容、标记原因、处理状态、发现时间。表格链接可以带 view 参数，系统会自动解析并保存；企业微信和飞书群只负责提醒未处理数量。
             </Text>
+            <Button
+              icon={testingFeishu ? undefined : feishuStatus === 'ok' ? <CheckCircleOutlined /> : feishuStatus === 'fail' ? <CloseCircleOutlined /> : <ApiOutlined />}
+              onClick={handleTestFeishu}
+              loading={testingFeishu}
+              style={{
+                marginTop: 10,
+                background: feishuStatus === 'ok' ? '#E8F7F4' : feishuStatus === 'fail' ? '#FFECEF' : '#FBFAFF',
+                borderColor: feishuStatus === 'ok' ? '#50B5A6' : feishuStatus === 'fail' ? '#EF5C6E' : '#E9E3F3',
+                color: feishuStatus === 'ok' ? '#277E72' : feishuStatus === 'fail' ? '#C64055' : '#726C83',
+              }}
+            >
+              {testingFeishu ? '检测中' : feishuStatus === 'ok' ? '台账可用' : feishuStatus === 'fail' ? '台账不可用' : '测试飞书台账'}
+            </Button>
           </div>
 
           <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>

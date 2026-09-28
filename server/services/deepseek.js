@@ -68,31 +68,57 @@ function getClient(apiKeyOverride = '') {
  * @param {string} templates - 话术模板文本
  * @returns {Promise<string>} 生成的回复
  */
-export async function generateReply(reviewContent, templates) {
-  const openai = getClient();
+function promptText(value = '', limit = 200) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit);
+}
 
-  const prompt = `你是一个拼多多耳机店铺「HECATE/漫步者」的客服。请根据用户评价，参考以下话术模板，生成一条真诚、个性化的回复。
+/**
+ * 好评回复提示词。固定内容（要求 + 话术模板）在前、每条评价不同的内容在后，
+ * 前缀不变就能命中 DeepSeek 的上下文缓存，模板再长也只按缓存价计费。
+ */
+function buildReplyPrompt({ reviewContent = '', templates = '', shopName = '', productName = '' } = {}) {
+  const shop = promptText(shopName, 40);
+  const productTitle = promptText(productName, 120);
+  return `请以拼多多店铺客服的身份，参考下面的话术模板，为用户评价改写一条真诚、个性化的回复。
+
+## 回复要求：
+1. 参考话术模板的语气和风格（亲切、真诚、有温度），但要结合这条评价的具体内容重新组织语言，不要整句照抄模板
+2. 评价提到了什么就回应什么（如提到音质就回应音质，提到佩戴舒适就回应舒适度）
+3. 可以从商品标题中提炼一个简短、口语化的商品称呼（如「品牌+型号」），在回复中自然提及一次；不要照抄完整标题、不要堆砌关键词；商品标题未知时不要编造商品名
+4. 品牌、型号、功能卖点只能用商品标题或评价里出现过的，不要编造参数、功能或活动，也不要从话术模板里照搬与本商品不符的内容
+5. 以本店的口吻用「我们」自称，不要提及其他店铺
+6. 回复长度控制在 50-150 字
+7. 直接输出回复内容，不要加任何前缀说明
 
 ## 话术模板参考：
 ${templates}
 
-## 回复要求：
-1. 必须参考上面话术的语气和风格（亲切、真诚、有温度）
-2. 根据用户评价的具体内容匹配对应风格（如评价提到音质→用音质类话术；提到佩戴舒适→用舒适度话术）
-3. 回复长度控制在 50-150 字
-4. 不要复制粘贴原文，要结合用户评价内容个性化
-5. 直接输出回复内容，不要加任何前缀说明
+## 店铺名称：
+${shop || '（未知）'}
+
+## 商品标题：
+${productTitle || '（未知）'}
 
 ## 用户评价：
 ${reviewContent}
 
 请生成回复：`;
+}
 
+/**
+ * 根据评价内容、店铺和商品标题，参考话术模板改写回复
+ * @param {string} reviewContent - 用户评价内容
+ * @param {string} templates - 话术模板文本
+ * @param {{shopName?: string, productName?: string}} context - 店铺名称、商品标题
+ * @returns {Promise<string>} 生成的回复
+ */
+export async function generateReply(reviewContent, templates, { shopName = '', productName = '' } = {}) {
+  const openai = getClient();
   const response = await openai.chat.completions.create({
     model: DEEPSEEK_MODEL,
     messages: [
-      { role: 'system', content: '你是一个专业的拼多多耳机店铺客服，回复风格亲切真诚。' },
-      { role: 'user', content: prompt },
+      { role: 'system', content: '你是一名专业的拼多多店铺客服，回复亲切真诚，不夸大、不编造。' },
+      { role: 'user', content: buildReplyPrompt({ reviewContent, templates, shopName, productName }) },
     ],
     temperature: 0.7,
     max_tokens: 1200,
@@ -213,6 +239,7 @@ ${content || '(空模板)'}`;
 
 export const __testing = {
   DEEPSEEK_MODEL,
+  buildReplyPrompt,
   sentimentRequestOptions: () => ({ ...SENTIMENT_REQUEST_OPTIONS }),
   buildSentimentPrompt: (reviewContent, context = {}) => buildSentimentPrompt(reviewContent, {
     ...context,
