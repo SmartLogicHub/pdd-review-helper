@@ -11,13 +11,14 @@ import {
   markReviewNeutral,
   markReviewUncertain,
   getSentimentCache,
+  saveRunReport,
   saveSentimentCache,
 } from '../data/store.js';
 import { getReply, sentimentFingerprint } from './reply-strategy.js';
 import { createSentimentCache } from './sentiment-cache.js';
 import { detectShopNameForAccount, e2eDryRunAllPages, replyAll } from './playwright.js';
 import { notifyWecomRiskSummary, syncFlaggedReview } from './risk-sync.js';
-import { effectiveFlagReason } from './review-normalizer.js';
+import { effectiveFlagReason, summarizeFailureReasons } from './review-normalizer.js';
 
 function createStoredSentimentCache(accountId) {
   return createSentimentCache({
@@ -44,6 +45,8 @@ export function createAutomationManager({
   syncRiskReview = syncFlaggedReview,
   notifyRiskSummary = notifyWecomRiskSummary,
   createRunSentimentCache = createStoredSentimentCache,
+  // 默认不落盘：测试里会建很多管理器；只有程序实际使用的实例（文件末尾）才传入存储函数
+  writeRunReport = null,
 } = {}) {
   const jobs = new Map();
   const emitter = new EventEmitter();
@@ -62,6 +65,35 @@ export function createAutomationManager({
   function ensureNoActiveJob() {
     if (findActiveJob()) {
       throw new Error('已有自动化任务正在运行或停止，请等待结束后再操作');
+    }
+  }
+
+  function collectRunRecords(result) {
+    if (Array.isArray(result?.records)) return result.records;
+    if (Array.isArray(result?.accounts)) {
+      return result.accounts.flatMap(account => (Array.isArray(account?.records) ? account.records : []));
+    }
+    return [];
+  }
+
+  // 任务结束时：按原因汇总失败（界面上不再只能看到第一条失败），并把完整报告存盘备查
+  function finalizeJob(job) {
+    if (job.result && typeof job.result === 'object') {
+      job.result.failureReasons = summarizeFailureReasons(collectRunRecords(job.result));
+    }
+    if (typeof writeRunReport !== 'function') return;
+    try {
+      writeRunReport({
+        id: job.id,
+        type: job.type,
+        status: job.status,
+        createdAt: job.createdAt,
+        finishedAt: new Date().toISOString(),
+        error: job.error,
+        result: job.result,
+      });
+    } catch {
+      // 报告写不进去不影响任务本身
     }
   }
 
@@ -240,10 +272,12 @@ export function createAutomationManager({
         if (result && sentimentCache) result.sentimentCacheHits = sentimentCache.stats().hits;
         job.result = result;
         job.status = result?.stopped ? 'stopped' : 'done';
+        finalizeJob(job);
         emit(job, job.status, result || {});
       } catch (err) {
         job.error = err.message || String(err);
         job.status = 'error';
+        finalizeJob(job);
         emit(job, 'error', { error: job.error });
       }
       return job;
@@ -417,10 +451,12 @@ export function createAutomationManager({
         summary.stopped = job.stopRequested;
         job.result = summary;
         job.status = summary.stopped ? 'stopped' : 'done';
+        finalizeJob(job);
         emit(job, job.status, summary);
       } catch (err) {
         job.error = err.message || String(err);
         job.status = 'error';
+        finalizeJob(job);
         emit(job, 'error', { error: job.error });
       }
       return job;
@@ -516,10 +552,12 @@ export function createAutomationManager({
         );
         job.result = result;
         job.status = result?.stopped ? 'stopped' : 'done';
+        finalizeJob(job);
         emit(job, job.status, result || {});
       } catch (err) {
         job.error = err.message || String(err);
         job.status = 'error';
+        finalizeJob(job);
         emit(job, 'error', { error: job.error });
       }
       return job;
@@ -543,4 +581,5 @@ function publicJob(job) {
 
 export const automationManager = createAutomationManager({
   detectShopName: detectShopNameForAccount,
+  writeRunReport: saveRunReport,
 });

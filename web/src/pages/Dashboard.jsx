@@ -852,6 +852,14 @@ export default function Dashboard() {
               {replyReport.firstFailure.screenshot ? `；截图 ${replyReport.firstFailure.screenshot}` : ''}
             </div>
           )}
+          {Array.isArray(replyReport.failureReasons) && replyReport.failureReasons.length > 0 && (
+            <div style={{ color: '#C64055', fontSize: 12, marginTop: 8, lineHeight: 1.7 }}>
+              <div style={{ fontWeight: 700 }}>失败原因汇总（完整报告已保存在数据目录 run-reports 文件夹）：</div>
+              {replyReport.failureReasons.map(item => (
+                <div key={item.reason}>· {item.count} 条：{item.example}</div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

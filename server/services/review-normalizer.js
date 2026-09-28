@@ -32,6 +32,23 @@ export function isSentimentAnalysisFailure(review = {}) {
 // 服务抖动、返回格式错误等）按单条跳过处理，失败评价留待稍后「重新分析」。
 export const FATAL_ANALYSIS_ERROR_KINDS = new Set(['authentication', 'billing', 'permission']);
 
+/**
+ * 把一次运行里的失败记录按原因归类计数。原因里的数字（页码、数量、订单号等）归一化为 N，
+ * 让「翻到第 3 页失败」「翻到第 7 页失败」算作同一类；每类保留一条原始原因作示例。
+ */
+export function summarizeFailureReasons(records = [], limit = 8) {
+  const groups = new Map();
+  for (const record of records) {
+    if (record?.status !== 'fail') continue;
+    const example = String(record.reason || '未知原因').replace(/\s+/g, ' ').trim();
+    const key = example.replace(/\d+/g, 'N').slice(0, 120);
+    const group = groups.get(key) || { reason: key, count: 0, example };
+    group.count += 1;
+    groups.set(key, group);
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count).slice(0, limit);
+}
+
 export function shouldStopReplyRunForAnalysisFailure(review = {}) {
   return review.analysisFailed === true
     && FATAL_ANALYSIS_ERROR_KINDS.has(String(review.analysisErrorKind || ''));

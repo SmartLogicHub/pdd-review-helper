@@ -318,6 +318,26 @@ export function saveSentimentCache(entries = {}, accountId = getCurrentAccount()
   }
 }
 
+// ====== 运行报告（每次自动回复结束后落盘，保留最近 30 份，便于事后查看每条失败原因）======
+
+const RUN_REPORTS_DIR = join(DATA_DIR, 'run-reports');
+const MAX_RUN_REPORTS = 30;
+
+export function saveRunReport(report = {}) {
+  try {
+    fs.mkdirSync(RUN_REPORTS_DIR, { recursive: true });
+    const stamp = String(report.finishedAt || new Date().toISOString()).replace(/[:.]/g, '-');
+    const id = String(report.id || 'job').replace(/[^\w-]+/g, '').slice(0, 8);
+    fs.writeFileSync(join(RUN_REPORTS_DIR, `${stamp}-${id}.json`), JSON.stringify(report, null, 2), 'utf-8');
+    const files = fs.readdirSync(RUN_REPORTS_DIR).filter(name => name.endsWith('.json')).sort();
+    for (const name of files.slice(0, Math.max(0, files.length - MAX_RUN_REPORTS))) {
+      fs.rmSync(join(RUN_REPORTS_DIR, name), { force: true });
+    }
+  } catch (e) {
+    console.error('[store] 保存运行报告失败:', e.message);
+  }
+}
+
 export function clearAllSentimentCaches() {
   try {
     fs.rmSync(SENTIMENT_CACHE_DIR, { recursive: true, force: true });
