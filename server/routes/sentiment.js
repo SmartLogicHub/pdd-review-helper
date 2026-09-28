@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  clearAllSentimentCaches,
   getCurrentAccount,
   getSentimentPrompt,
   resetSentimentPrompt,
@@ -27,6 +28,7 @@ export function createSentimentRouter({
   analyzeReview = analyzeSentiment,
   repairPromptWithAI = repairSentimentPromptWithAI,
   reanalyzeReviews = reanalyzeStoredReviews,
+  clearSentimentCaches = clearAllSentimentCaches,
 } = {}) {
   const router = Router();
 
@@ -126,6 +128,8 @@ export function createSentimentRouter({
           shopName: account.shopName || account.name || '',
         }),
       });
+      // 点了「应用重新分析」就意味着要重新判：清掉判断缓存，下次自动回复按新结论重判
+      if (apply) clearSentimentCaches();
       res.json(summary);
     } catch (err) {
       res.status(500).json({ error: err.message });

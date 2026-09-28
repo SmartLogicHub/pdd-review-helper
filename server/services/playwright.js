@@ -21,6 +21,7 @@ import {
   shouldAutoReplyReview,
   shouldContinueReplyRun,
   shouldStopReplyRunForAnalysisFailure,
+  usesConservativeReply,
   effectiveFlagReason,
   updateReplyRunLiveState,
 } from './review-normalizer.js';
@@ -1415,20 +1416,28 @@ async function locateReviewByFilteredPages(page, review, options = {}) {
   };
 }
 
-async function analyzeAndMark(review, analyzer = analyzeSentiment) {
+async function analyzeAndMark(review, analyzer = analyzeSentiment, { cache = null } = {}) {
   if (review.stars < 4) return review;
   if (!shouldAutoReplyReview(review).ok) return review;
-  const sentiment = await analyzer(review.content, review.stars, {
+  const context = {
     productName: review.productName || '',
     userName: review.userName || '',
     shopName: review.shopName || '',
-  });
+  };
+  // 已判断过且输入没变的评价直接复用结论，不再调用 AI（见 sentiment-cache.js）
+  const cacheKey = cache ? reviewKey(review) : '';
+  const fingerprint = cacheKey ? cache.fingerprint(review.content, review.stars, context) : '';
+  let sentiment = fingerprint ? cache.get(cacheKey, fingerprint) : null;
+  if (!sentiment) {
+    sentiment = await analyzer(review.content, review.stars, context);
+    if (fingerprint) cache.set(cacheKey, fingerprint, sentiment);
+  }
   return {
     ...review,
     flagged: Boolean(sentiment.flagged),
     flagReason: sentiment.reason || '',
     uncertainSkip: Boolean(sentiment.uncertain),
-    uncertainReason: sentiment.uncertain ? (sentiment.reason || '评价无法判断，已跳过自动回复') : '',
+    uncertainReason: sentiment.uncertain ? (sentiment.reason || '评价无法判断，使用保守回复') : '',
     neutralReply: Boolean(sentiment.neutral),
     neutralReason: sentiment.neutral ? (sentiment.reason || '中性评价，使用保守回复') : '',
     sentimentLabel: sentiment.label || '',
@@ -1464,7 +1473,7 @@ function markLocalRiskOnly(review) {
     flagged: Boolean(sentiment.flagged),
     flagReason: sentiment.reason || '',
     uncertainSkip: Boolean(sentiment.uncertain),
-    uncertainReason: sentiment.uncertain ? (sentiment.reason || '评价无法判断，已跳过自动回复') : '',
+    uncertainReason: sentiment.uncertain ? (sentiment.reason || '评价无法判断，使用保守回复') : '',
     neutralReply: false,
     neutralReason: '',
     sentimentLabel: sentiment.label || '',
@@ -2170,7 +2179,11 @@ export async function replyAll(genReply, onProgress, options = {}) {
     for (const rawReview of pageReviews) {
       if (!shouldContinueReplyRun(report, totalTarget) || isStopped(options.stopSignal)) break;
 
-      const review = await analyzeAndMark({ ...rawReview, shopName: rawReview.shopName || options.shopName || '' });
+      const review = await analyzeAndMark(
+        { ...rawReview, shopName: rawReview.shopName || options.shopName || '' },
+        analyzeSentiment,
+        { cache: options.sentimentCache || null }
+      );
       const key = reviewKey(review);
       if (key && skippedKeys.has(key)) continue;
       const decision = shouldAutoReplyReview(review);
@@ -2216,11 +2229,15 @@ export async function replyAll(genReply, onProgress, options = {}) {
       }
 
       try {
-        if (review.neutralReply || review.sentimentLabel === 'neutral_auto_reply') {
+        const conservative = decision.replyMode === 'neutral';
+        if (review.uncertainSkip) {
+          // AI 无法判断的评价：记录下来便于复核，但不再跳过，用保守话术回复
+          options.onReviewUncertain?.(review, review.uncertainReason || '评价无法判断，使用保守回复');
+        } else if (conservative) {
           options.onReviewNeutral?.(review, review.neutralReason || '中性评价，使用保守回复');
         }
         const { reply, method } = await genReply(review, {
-          neutral: review.neutralReply || review.sentimentLabel === 'neutral_auto_reply',
+          neutral: conservative,
           shopName: options.shopName || '',
         });
         const submitResult = await submitReplyForReview(page, review, reply, {
@@ -2515,7 +2532,7 @@ export async function e2eDryRunAllPages(genReply, onProgress, options = {}) {
       let replyResult;
       try {
         replyResult = await genReply(review, {
-          neutral: review.neutralReply || review.sentimentLabel === 'neutral_auto_reply',
+          neutral: usesConservativeReply(review),
           shopName: options.shopName || '',
         });
       } catch (err) {

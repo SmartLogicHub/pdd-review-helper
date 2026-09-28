@@ -2,10 +2,25 @@ const SECONDS_PER_DAY = 24 * 60 * 60;
 const DEFAULT_GOOD_REVIEW_DAYS = 90;
 const GOOD_REVIEW_DAY_OPTIONS = new Set([30, 90, 180]);
 export const PDD_REVIEW_DISPLAY_LIMIT = 2000;
+// 这些「不确定」其实是技术故障（AI 输出坏了），按分析失败处理，绝不能拿去自动回复
 const LEGACY_ANALYSIS_FAILURE_REASONS = new Set([
   'AI判断结果不是有效JSON，跳过自动回复',
+  'AI判断结果字段不完整或标签非法，跳过自动回复',
   'AI情感分析失败，跳过自动回复',
 ]);
+
+/**
+ * 是否使用保守回复（只感谢 + 有问题联系客服，不夸卖点）。
+ * 中性评价，以及 AI 无法判断的「不确定」评价都走保守回复；明确的差评仍转人工，不在此列。
+ */
+export function usesConservativeReply(review = {}) {
+  return Boolean(
+    review.neutralReply
+    || review.sentimentLabel === 'neutral_auto_reply'
+    || review.uncertainSkip
+    || review.sentimentLabel === 'uncertain_skip'
+  );
+}
 
 export function isSentimentAnalysisFailure(review = {}) {
   if (review.analysisFailed === true) return true;
@@ -140,9 +155,7 @@ export function shouldAutoReplyReview(review = {}) {
   if (review.flagged) {
     return { ok: false, reason: effectiveFlagReason(review) };
   }
-  if (review.uncertainSkip) {
-    return { ok: false, reason: review.uncertainReason || '评价无法判断，已跳过自动回复' };
-  }
+  // 「不确定」不再跳过：下面会以保守回复放行（replyMode = 'neutral'）
   if (review.canReview === false || review.canInteract === false) {
     return { ok: false, reason: '平台不允许回复/互动' };
   }
@@ -155,7 +168,7 @@ export function shouldAutoReplyReview(review = {}) {
   return {
     ok: true,
     reason: '',
-    replyMode: review.neutralReply || review.sentimentLabel === 'neutral_auto_reply' ? 'neutral' : 'positive',
+    replyMode: usesConservativeReply(review) ? 'neutral' : 'positive',
   };
 }
 
@@ -460,7 +473,7 @@ export function recordReplyRunOutcome(report, {
   if (status === 'ok' || status === 'dry-run') {
     report.replyable += 1;
     report.success += 1;
-    if (review.neutralReply || review.sentimentLabel === 'neutral_auto_reply') {
+    if (usesConservativeReply(review)) {
       report.neutralReplies += 1;
     } else {
       report.positiveReplies += 1;

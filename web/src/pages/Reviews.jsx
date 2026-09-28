@@ -29,7 +29,7 @@ function reviewStatus(record = {}) {
   if (record.replied) return 'replied';
   if (record.flagged) return 'flagged';
   if (record.replyBlocked || record.canReview === false || record.canInteract === false) return 'blocked';
-  if (record.analysisFailed || /AI(?:判断结果不是有效JSON|情感分析失败)/.test(record.uncertainReason || '')) return 'analysis_failed';
+  if (record.analysisFailed || /AI(?:判断结果不是有效JSON|判断结果字段不完整或标签非法|情感分析失败)/.test(record.uncertainReason || '')) return 'analysis_failed';
   if (record.uncertainSkip) return 'uncertain';
   if (record.neutralReply || record.sentimentLabel === 'neutral_auto_reply') return 'neutral';
   return 'pending';
@@ -65,7 +65,7 @@ function StatusTag({ record }) {
   }
   if (status === 'uncertain') {
     return (
-      <Tooltip title={record.uncertainReason || '评价信息不足，已跳过自动回复'}>
+      <Tooltip title={record.uncertainReason || 'AI 无法判断，将使用保守话术回复'}>
         <Tag color="geekblue" icon={<QuestionCircleOutlined />}>无法判断</Tag>
       </Tooltip>
     );

@@ -10,11 +10,22 @@ import {
   markReviewFlagged,
   markReviewNeutral,
   markReviewUncertain,
+  getSentimentCache,
+  saveSentimentCache,
 } from '../data/store.js';
-import { getReply } from './reply-strategy.js';
+import { getReply, sentimentFingerprint } from './reply-strategy.js';
+import { createSentimentCache } from './sentiment-cache.js';
 import { detectShopNameForAccount, e2eDryRunAllPages, replyAll } from './playwright.js';
 import { notifyWecomRiskSummary, syncFlaggedReview } from './risk-sync.js';
 import { effectiveFlagReason } from './review-normalizer.js';
+
+function createStoredSentimentCache(accountId) {
+  return createSentimentCache({
+    load: () => getSentimentCache(accountId),
+    save: entries => saveSentimentCache(entries, accountId),
+    fingerprint: sentimentFingerprint,
+  });
+}
 
 export function createAutomationManager({
   runner = replyAll,
@@ -32,6 +43,7 @@ export function createAutomationManager({
   detectShopName = async account => account,
   syncRiskReview = syncFlaggedReview,
   notifyRiskSummary = notifyWecomRiskSummary,
+  createRunSentimentCache = createStoredSentimentCache,
 } = {}) {
   const jobs = new Map();
   const emitter = new EventEmitter();
@@ -207,6 +219,7 @@ export function createAutomationManager({
           });
         }
         const riskSummary = createRiskSummary();
+        const sentimentCache = createRunSentimentCache(accountForRun.id);
         let result;
         try {
           result = await runner(
@@ -214,14 +227,17 @@ export function createAutomationManager({
             progress => emit(job, 'progress', progress),
             {
               ...optionsForAccount(settings, accountForRun, options, riskSummary),
+              sentimentCache,
               stopSignal: {
                 isStopped: () => job.stopRequested,
               },
             }
           );
         } finally {
+          sentimentCache?.flush();
           await flushRiskSummary(settings, accountForRun, riskSummary, job);
         }
+        if (result && sentimentCache) result.sentimentCacheHits = sentimentCache.stats().hits;
         job.result = result;
         job.status = result?.stopped ? 'stopped' : 'done';
         emit(job, job.status, result || {});
@@ -305,6 +321,7 @@ export function createAutomationManager({
         skippedUncertain: 0,
         skippedAnalysisFailed: 0,
         skippedBlocked: 0,
+        sentimentCacheHits: 0,
         stopped: false,
         reviewDays: settings.reviewDays || 90,
       };
@@ -340,6 +357,7 @@ export function createAutomationManager({
           });
           let accountResult;
           const riskSummary = createRiskSummary();
+          const sentimentCache = createRunSentimentCache(accountForRun.id);
           try {
             const result = await runner(
               genReply,
@@ -351,6 +369,7 @@ export function createAutomationManager({
               }),
               {
                 ...optionsForAccount(settings, accountForRun, options, riskSummary),
+                sentimentCache,
                 stopSignal: {
                   isStopped: () => job.stopRequested,
                 },
@@ -375,8 +394,10 @@ export function createAutomationManager({
               error: err.message || String(err),
             };
           } finally {
+            sentimentCache?.flush();
             await flushRiskSummary(settings, accountForRun, riskSummary, job);
           }
+          summary.sentimentCacheHits += Number(sentimentCache?.stats().hits || 0);
           summary.accounts.push(accountResult);
           summary.total += Number(accountResult?.total || 0);
           summary.success += Number(accountResult?.success || 0);

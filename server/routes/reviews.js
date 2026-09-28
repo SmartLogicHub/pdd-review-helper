@@ -107,7 +107,7 @@ router.post('/:id/generate', async (req, res) => {
     const accountId = req.query.accountId || accountsState.currentAccountId;
     const account = accountsState.accounts.find(item => item.id === accountId) || {};
     const result = await getReply(review, {
-      neutral: currentStatus === 'neutral',
+      neutral: currentStatus === 'neutral' || currentStatus === 'uncertain',
       shopName: account.shopName || '',
     });
     res.json({ reply: result.reply, method: result.method });

@@ -1,13 +1,16 @@
 import fs from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { createHash } from 'crypto';
 import {
   generateReply as defaultGenerateReply,
   generateNeutralReply as defaultGenerateNeutralReply,
   analyzeSentiment as askLLM,
+  sentimentModelSignature,
 } from './deepseek.js';
-import { getNeutralTemplates, getSettings, getTemplates } from '../data/store.js';
+import { getNeutralTemplates, getSentimentPrompt, getSettings, getTemplates } from '../data/store.js';
 import { classifySentimentError } from './sentiment-reliability.js';
+import { usesConservativeReply } from './review-normalizer.js';
 
 // 生成函数默认取 deepseek 实现，测试可通过 __setReplyGeneratorsForTest 注入替身
 let generateReply = defaultGenerateReply;
@@ -216,6 +219,31 @@ export function detectLocalRiskSentiment(reviewContent = '') {
   return sentimentResult('positive_auto_reply', '未发现当前商品负面体验');
 }
 
+// 本地规则（未开启 AI 判断时使用）改动后把版本号加一，让旧的本地判断缓存失效
+const LOCAL_SENTIMENT_RULES_VERSION = 'local-rules-v1';
+
+/**
+ * 情感判断的缓存指纹：凡是会影响判断结论的输入都算进去。
+ * AI 模式包含提示词全文和模型参数，改提示词、换模型都会自动重判。
+ */
+export function sentimentFingerprint(reviewContent, stars, context = {}) {
+  const settings = getSettings();
+  const useAi = Boolean(settings.aiSentimentEnabled && settings.deepseekApiKey);
+  const basis = useAi
+    ? [
+      'ai',
+      sentimentModelSignature(),
+      getSentimentPrompt(),
+      String(reviewContent || ''),
+      String(stars ?? ''),
+      String(context.productName || ''),
+      String(context.shopName || ''),
+      String(context.userName || ''),
+    ]
+    : ['local', LOCAL_SENTIMENT_RULES_VERSION, String(reviewContent || ''), String(stars ?? '')];
+  return createHash('sha256').update(JSON.stringify(basis)).digest('hex').slice(0, 32);
+}
+
 /**
  * 分析评价情感：好评星级 + 差评内容？
  * @param {string} reviewContent - 评价原文
@@ -256,8 +284,7 @@ export async function getReply(reviewContent, options = {}) {
     : String(reviewContent || '');
   const isNeutral = Boolean(
     options.neutral
-    || reviewContent?.neutralReply
-    || reviewContent?.sentimentLabel === 'neutral_auto_reply'
+    || (typeof reviewContent === 'object' && reviewContent && usesConservativeReply(reviewContent))
   );
   const contentResult = hasContent(content);
   const aiEnabled = getSettings().aiReplyEnabled;

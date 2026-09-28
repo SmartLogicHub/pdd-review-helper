@@ -42,7 +42,7 @@ function reviewStatus(record = {}) {
   if (record.replied) return 'replied';
   if (record.flagged) return 'flagged';
   if (record.replyBlocked || record.canReview === false || record.canInteract === false) return 'blocked';
-  if (record.analysisFailed || /AI(?:判断结果不是有效JSON|情感分析失败)/.test(record.uncertainReason || '')) return 'analysis_failed';
+  if (record.analysisFailed || /AI(?:判断结果不是有效JSON|判断结果字段不完整或标签非法|情感分析失败)/.test(record.uncertainReason || '')) return 'analysis_failed';
   if (record.uncertainSkip) return 'uncertain';
   if (record.neutralReply || record.sentimentLabel === 'neutral_auto_reply') return 'neutral';
   return 'pending';
@@ -78,7 +78,7 @@ function StatusTag({ record }) {
   }
   if (status === 'uncertain') {
     return (
-      <Tooltip title={record.uncertainReason || '评价信息不足，已跳过自动回复'}>
+      <Tooltip title={record.uncertainReason || 'AI 无法判断，将使用保守话术回复'}>
         <Tag color="geekblue" icon={<QuestionCircleOutlined />}>无法判断</Tag>
       </Tooltip>
     );
@@ -347,7 +347,7 @@ export default function Dashboard() {
       }
       if (event.type === 'done') {
         setReplyReport(event);
-        message.success(`${event.mode === 'e2e-dry-run' ? '全页 E2E Dry-run' : event.dryRun ? 'Dry-run 验收' : '自动回复'}完成：扫描 ${event.scanned || 0} 条，弹窗 ${event.dialogOpened || event.success || 0} 次，失败 ${event.failed || 0} 条`);
+        message.success(`${event.mode === 'e2e-dry-run' ? '全页 E2E Dry-run' : event.dryRun ? 'Dry-run 验收' : '自动回复'}完成：扫描 ${event.scanned || 0} 条，弹窗 ${event.dialogOpened || event.success || 0} 次，失败 ${event.failed || 0} 条${event.sentimentCacheHits ? `，复用已有判断 ${event.sentimentCacheHits} 条（省去对应的 AI 调用）` : ''}`);
         await finishAutoReply();
         return;
       }

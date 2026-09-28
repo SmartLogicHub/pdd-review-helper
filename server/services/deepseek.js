@@ -27,6 +27,11 @@ const SENTIMENT_REQUEST_OPTIONS = {
   response_format: { type: 'json_object' },
 };
 
+/** 情感判断用的模型与参数；参与缓存指纹，换模型或改参数后旧的判断缓存自动失效 */
+export function sentimentModelSignature() {
+  return JSON.stringify({ model: DEEPSEEK_MODEL, ...SENTIMENT_REQUEST_OPTIONS });
+}
+
 /**
  * 读取 completion 正文，并显式检查 finish_reason。
  * 空内容/被截断一律抛错，交由上层回退模板或重试，避免静默产出空回复。

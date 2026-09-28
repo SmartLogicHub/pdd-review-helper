@@ -14,6 +14,7 @@ import {
   normalizeReviewStatusFilter,
   normalizePddReviewItem,
   recordReplyRunOutcome,
+  usesConservativeReply,
   reviewPageCountForRows,
   sameReviewIdentity,
   summarizeReviewRecords,
@@ -145,8 +146,18 @@ test('only auto-replies safe 4/5 star unreplied reviews', () => {
   assert.equal(shouldAutoReplyReview({ ...base, canReview: undefined }).ok, true);
   assert.equal(shouldAutoReplyReview({ ...base, replyBlocked: true, skipReason: '平台提示不可回复' }).ok, false);
   assert.equal(shouldAutoReplyReview({ ...base, flagged: true }).ok, false);
-  assert.equal(shouldAutoReplyReview({ ...base, uncertainSkip: true }).ok, false);
-  assert.match(shouldAutoReplyReview({ ...base, uncertainSkip: true }).reason, /无法判断|跳过/);
+  // AI 真正「无法判断」的评价不再跳过，改用保守话术回复
+  const uncertainDecision = shouldAutoReplyReview({ ...base, uncertainSkip: true, sentimentLabel: 'uncertain_skip', uncertainReason: '评价描述的是服装，与耳机不符' });
+  assert.equal(uncertainDecision.ok, true);
+  assert.equal(uncertainDecision.replyMode, 'neutral');
+  // 但 AI 输出坏掉产生的「不确定」是技术故障，必须继续拦住，不能自动回复
+  for (const technicalReason of [
+    'AI判断结果不是有效JSON，跳过自动回复',
+    'AI判断结果字段不完整或标签非法，跳过自动回复',
+    'AI情感分析失败，跳过自动回复',
+  ]) {
+    assert.equal(shouldAutoReplyReview({ ...base, uncertainSkip: true, uncertainReason: technicalReason }).ok, false, technicalReason);
+  }
 
   const neutralDecision = shouldAutoReplyReview({ ...base, neutralReply: true, sentimentLabel: 'neutral_auto_reply' });
   assert.equal(neutralDecision.ok, true);
@@ -546,4 +557,15 @@ test('reports fetched, new, total and unreplied counts when merging fetched revi
   assert.equal(result.total, 3);
   assert.equal(result.unreplied, 2);
   assert.equal(result.reviews.find(review => review.reviewId === 'r1').replied, true);
+});
+
+test('uncertain reviews answered conservatively are counted as conservative replies, not positive ones', () => {
+  const report = createReplyRunReport({ target: 2, totalRows: 2 });
+  recordReplyRunOutcome(report, { review: { reviewId: 'u-1', uncertainSkip: true, sentimentLabel: 'uncertain_skip' }, status: 'ok' });
+  recordReplyRunOutcome(report, { review: { reviewId: 'p-1', sentimentLabel: 'positive_auto_reply' }, status: 'ok' });
+
+  assert.equal(report.neutralReplies, 1);
+  assert.equal(report.positiveReplies, 1);
+  assert.equal(usesConservativeReply({ uncertainSkip: true }), true);
+  assert.equal(usesConservativeReply({ sentimentLabel: 'positive_auto_reply' }), false);
 });

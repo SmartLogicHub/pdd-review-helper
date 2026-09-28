@@ -78,7 +78,7 @@ function resultPatch(result = {}) {
       flagged: false,
       flagReason: '',
       uncertainSkip: true,
-      uncertainReason: reason || '评价无法安全判断，跳过自动回复',
+      uncertainReason: reason || '评价无法安全判断，使用保守回复',
       neutralReply: false,
       neutralReason: '',
       uncertainAt: new Date().toISOString(),

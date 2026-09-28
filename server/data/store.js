@@ -24,6 +24,7 @@ const SETTINGS_FILE = join(DATA_DIR, 'settings.json');
 const TEMPLATES_FILE = join(DATA_DIR, '好评例子.txt');
 const NEUTRAL_TEMPLATES_FILE = join(DATA_DIR, '中性回复模板.txt');
 const SENTIMENT_PROMPT_FILE = join(DATA_DIR, '情感分析提示词.txt');
+const SENTIMENT_CACHE_DIR = join(DATA_DIR, 'sentiment-cache');
 const LEGACY_DATA_DIRS = [
   __dirname,
   join(APP_DIR, 'data'),
@@ -38,14 +39,14 @@ const LEGACY_TEMPLATE_FILES = [
 const DEFAULT_ACCOUNT_ID = 'default';
 const DEFAULT_ACCOUNT_NAME = '默认账号';
 
+// 仅在数据目录里还没有模板文件时使用；只放通用话术，不写具体卖点，避免套到别的商品上变成虚假描述
 const DEFAULT_TEMPLATES = [
-  '感谢亲的好评！漫步者专注音质27年，HECATE系列专为电竞和音乐爱好者打造，希望能陪伴您每一次精彩时刻！',
-  '谢谢亲的支持！HECATE耳机在低频表现和佩戴舒适度上做了大量优化，您用得开心就是我们最大的动力~',
-  '感谢您的5星好评！漫步者作为国产音频品牌，一直坚持自主研发，您的认可是我们前进的动力！',
-  '谢谢亲的肯定！如果在使用过程中有任何疑问，随时联系我们的客服，7x24小时为您服务~',
-  '感谢好评！HECATE致力于为玩家提供极致的游戏音频体验，祝您游戏愉快，天天吃鸡！',
-  '感谢支持！漫步者HECATE支持APP自定义调音，您可以根据喜好调节EQ，发现更多声音的乐趣~',
-  '谢谢亲！这款耳机的50mm大单元和高解析音频认证，就是为了让您感受身临其境的声音体验！',
+  '亲爱的您好，感谢您对我们产品的肯定，我们会继续努力给您带来更好的服务和产品。您的满意是我们最大的追求~后期如果有使用方面的问题，可以随时与我们在线客服联系。祝您生活愉快！',
+  '亲爱的您好，感谢您的支持与肯定，希望我们的产品能够令您满意，如果有任何问题欢迎您随时联系我们的客服哦，我们必定为您全力解忧。祝您生活愉快！',
+  '亲爱的您好，感谢您对我们产品的支持与信赖。我们会继续努力给顾客们带来更好的服务和质量，有任何问题都可以随时联系这边的在线客服哦~期待您的再次光临，祝您生活愉快！',
+  '亲爱的您好，感谢您的支持与肯定，期待与您的再次合作！有什么使用问题都可以随时联系我们的在线客服，我们竭诚为您服务，祝您生活愉快！',
+  '亲爱的您好，您的满意是对我们最大的支持与鼓励，也将是我们不断前进的动力！ 谢谢您的光顾，希望与您有更多的合作！您在产品使用过程中如有任何疑问欢迎随时咨询在线客服，我们竭诚为您服务，祝您生活愉快！',
+  '亲爱的您好，感谢您肯定我们的产品，我们会继续努力给您带来更好的服务和产品！您的满意是我们最大的追求~后期如果有使用方面的问题，可以随时与我们联系！祝您生活愉快！',
 ];
 
 const DEFAULT_NEUTRAL_TEMPLATES = [
@@ -295,6 +296,34 @@ export function getReviews(accountId = getCurrentAccount().id) {
   }
   const reviews = readJsonFile(file, []);
   return Array.isArray(reviews) ? reviews.map(cleanStoredReview) : [];
+}
+
+// ====== 情感判断缓存（按账号，记住已判断过的评价，避免每次运行重复调用 AI）======
+
+function sentimentCacheFileForAccount(accountId) {
+  return join(SENTIMENT_CACHE_DIR, `${normalizeAccountId(accountId)}.json`);
+}
+
+export function getSentimentCache(accountId = getCurrentAccount().id) {
+  const entries = readJsonFile(sentimentCacheFileForAccount(accountId), {});
+  return entries && typeof entries === 'object' && !Array.isArray(entries) ? entries : {};
+}
+
+export function saveSentimentCache(entries = {}, accountId = getCurrentAccount().id) {
+  try {
+    fs.mkdirSync(SENTIMENT_CACHE_DIR, { recursive: true });
+    fs.writeFileSync(sentimentCacheFileForAccount(accountId), JSON.stringify(entries), 'utf-8');
+  } catch (e) {
+    console.error('[store] 保存情感判断缓存失败:', e.message);
+  }
+}
+
+export function clearAllSentimentCaches() {
+  try {
+    fs.rmSync(SENTIMENT_CACHE_DIR, { recursive: true, force: true });
+  } catch (e) {
+    console.error('[store] 清除情感判断缓存失败:', e.message);
+  }
 }
 
 export function saveReviews(reviews, accountId = getCurrentAccount().id) {
