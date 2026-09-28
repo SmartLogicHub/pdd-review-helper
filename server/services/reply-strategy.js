@@ -271,12 +271,36 @@ export async function analyzeSentiment(reviewContent, stars, context = {}) {
   return detectLocalRiskSentiment(reviewContent);
 }
 
+export const REPLY_MAX_LENGTH = 200;
+
+/**
+ * 拼多多拒收含空格、换行等特殊字符的回复（「回复内容不能包含空格、换行等特殊字符！」），
+ * 回复框最多 200 字。去掉所有空白、零宽字符和表情；超长时截到最后一个完整句子。
+ * 例：AI 从标题提炼的「LolliClip SE」会变成「LolliClipSE」。
+ */
+export function sanitizeReplyText(text = '', maxLength = REPLY_MAX_LENGTH) {
+  let clean = String(text || '')
+    .replace(/[\s　​-‍⁠﻿]+/g, '')
+    .replace(/\p{Extended_Pictographic}|️|⃣/gu, '');
+  if (clean.length > maxLength) {
+    const cut = clean.slice(0, maxLength);
+    const lastEnd = Math.max(...['。', '！', '!', '？', '?', '~', '～'].map(mark => cut.lastIndexOf(mark)));
+    clean = lastEnd >= maxLength * 0.5 ? cut.slice(0, lastEnd + 1) : cut;
+  }
+  return clean;
+}
+
 /**
  * 根据评价内容生成回复
  * @param {string} reviewContent - 用户评价原文
  * @returns {Promise<{reply: string, method: 'llm'|'template'}|{skip: true, reason: string}>}
  */
 export async function getReply(reviewContent, options = {}) {
+  const result = await buildReply(reviewContent, options);
+  return result?.reply ? { ...result, reply: sanitizeReplyText(result.reply) } : result;
+}
+
+async function buildReply(reviewContent, options = {}) {
   loadTemplates();
 
   const content = typeof reviewContent === 'object' && reviewContent

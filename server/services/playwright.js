@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { analyzeSentiment, detectLocalRiskSentiment } from './reply-strategy.js';
+import { analyzeSentiment, detectLocalRiskSentiment, sanitizeReplyText } from './reply-strategy.js';
 import { getPddPageState, SECURITY_VERIFICATION_TEXT_PATTERN } from './pdd-page-state.js';
 import { updateAccountShopName } from '../data/store.js';
 import {
@@ -1802,7 +1802,7 @@ async function fillVisibleReplyTextarea(page, value) {
 
 async function collectReplySubmitMessages(page) {
   return page.evaluate(() => {
-    const pattern = /(不可评论|不支持回复|暂不支持回复|不能回复|无法回复|评价已关闭|评论已关闭|已设置为不可评论|回复成功|提交成功|操作成功|发布成功|评论成功)/;
+    const pattern = /(不可评论|不支持回复|暂不支持回复|不能回复|无法回复|评价已关闭|评论已关闭|已设置为不可评论|回复成功|提交成功|操作成功|发布成功|评论成功|不能包含|特殊字符|敏感词|违禁词|内容不合规|内容违规|包含违规|字数超|超出字数)/;
     const isVisible = (node) => {
       if (!node || !node.getBoundingClientRect) return false;
       const rect = node.getBoundingClientRect();
@@ -1925,6 +1925,8 @@ async function submitReplyForReview(page, review, replyText, {
   captureNetwork = false,
 } = {}) {
   const networkProbe = captureNetwork ? createReplyNetworkProbe(page) : null;
+  // 拼多多拒收含空格、换行等特殊字符的回复；手动编辑过的回复也在这里统一清洗
+  replyText = sanitizeReplyText(replyText);
   if (!String(replyText || '').trim()) {
     // 兜底：回复内容为空绝不提交，避免填入空白回复
     throw new Error('回复内容为空，已跳过提交');
@@ -1968,6 +1970,10 @@ async function submitReplyForReview(page, review, replyText, {
         fillResult,
         networkRequests,
       };
+    }
+    if (submitFeedback?.status === 'fail') {
+      // 平台拒收：抛错让上层记为失败（附截图、关闭弹窗），不能当成已回复
+      throw new Error(submitFeedback.reason);
     }
     // 「评价互动」侧栏发布后不一定自动关闭，留着会挡住下一条评价的「回复/互动」入口
     if (!(await waitForNoVisibleReplyTextarea(page, 1500))) {

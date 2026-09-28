@@ -318,6 +318,10 @@ export function summarizeReviewRecords(reviews = []) {
 const REPLY_BLOCKED_MESSAGE_PATTERN = /不可评论|不支持回复|暂不支持回复|不能回复|无法回复|评价已关闭|评论已关闭|已设置为不可评论/;
 // 「评价互动」侧栏（评价下已有机器人/买家留言时出现）用的是「发布」按钮，提示可能是发布/评论成功
 const REPLY_SUCCESS_MESSAGE_PATTERN = /回复成功|提交成功|操作成功|发布成功|评论成功/;
+// 平台拒收回复内容（如「回复内容不能包含空格、换行等特殊字符！」）：必须算失败。
+// 没抓到任何提示时程序按成功处理，漏判会把没发出去的回复记成已回复。
+// 注意别用单独的「违规」：商家后台侧边栏有「违规信息」菜单。
+export const REPLY_REJECTED_MESSAGE_PATTERN = /不能包含|特殊字符|敏感词|违禁词|内容不合规|内容违规|包含违规|字数超|超出字数/;
 
 export function classifyReplySubmitMessage(text = '') {
   const message = String(text || '').replace(/\s+/g, ' ').trim();
@@ -327,6 +331,14 @@ export function classifyReplySubmitMessage(text = '') {
       ok: false,
       status: 'skip',
       reason: `平台提示不可回复：${message}`,
+      message,
+    };
+  }
+  if (REPLY_REJECTED_MESSAGE_PATTERN.test(message)) {
+    return {
+      ok: false,
+      status: 'fail',
+      reason: `拼多多拒收了回复内容：${message}`,
       message,
     };
   }
