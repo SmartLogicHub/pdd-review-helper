@@ -37,11 +37,31 @@ export const FATAL_ANALYSIS_ERROR_KINDS = new Set(['authentication', 'billing', 
  * 让「翻到第 3 页失败」「翻到第 7 页失败」算作同一类；每类保留一条原始原因作示例。
  */
 export function summarizeFailureReasons(records = [], limit = 8) {
+  return summarizeRecordReasons(records, 'fail', limit);
+}
+
+const SKIP_CATEGORY_LABELS = {
+  flagged: '疑似差评（转人工）',
+  blocked: '平台不允许回复',
+  analysis_failed: 'AI分析失败',
+  replied: '已回复',
+  uncertain: '无法判断',
+  neutral: '中性',
+  pending: '其他',
+};
+
+/**
+ * 同上，按任意状态汇总（如 'skip'：看清大批评价为什么被跳过）。
+ * 带类别的记录按类别归并（疑似差评的理由是 AI 逐条写的，按文字归类会碎成一条一类）。
+ */
+export function summarizeRecordReasons(records = [], status = 'fail', limit = 8) {
   const groups = new Map();
   for (const record of records) {
-    if (record?.status !== 'fail') continue;
+    if (record?.status !== status) continue;
     const example = String(record.reason || '未知原因').replace(/\s+/g, ' ').trim();
-    const key = example.replace(/\d+/g, 'N').slice(0, 120);
+    const key = record.category
+      ? (SKIP_CATEGORY_LABELS[record.category] || record.category)
+      : example.replace(/\d+/g, 'N').slice(0, 120);
     const group = groups.get(key) || { reason: key, count: 0, example };
     group.count += 1;
     groups.set(key, group);
@@ -135,7 +155,7 @@ export function normalizePddReviewItem(item = {}) {
     specs: parseSpecs(item.specs),
     time: createTime ? formatPddTime(createTime) : '',
     fetchedAt: new Date().toISOString(),
-    replied: replyCount > 0 || replyList.length > 0 || hasTextValue(item.reply),
+    replied: hasMerchantReply(replyList) || hasTextValue(item.reply),
     reply: item.reply || '',
     replyList,
     replyCount,
@@ -208,13 +228,26 @@ export function effectiveFlagReason(review = {}, reason = '') {
   return '疑似差评，需人工处理';
 }
 
+/**
+ * replyList 里不只有店铺的回复：拼多多平台的「评价总结小助手」机器人、其他买家的互动留言也在里面，
+ * 它们不算商家回复（拼多多仍把这些评价算作「未回复」）。只有店铺账号（userType 1）发的才算。
+ * 没有作者信息的条目按商家回复处理：宁可少回一条，也不重复回复。
+ */
+export function hasMerchantReply(replyList = []) {
+  return Array.isArray(replyList) && replyList.some(entry => {
+    const author = entry?.userInfo;
+    if (!author || typeof author !== 'object') return true;
+    return Number(author.userType) === 1;
+  });
+}
+
 export function isReviewAlreadyReplied(review = {}) {
-  return Boolean(
-    review.replied
-    || Number(review.replyCount || 0) > 0
-    || (Array.isArray(review.replyList) && review.replyList.length > 0)
-    || hasTextValue(review.reply)
-  );
+  // replyCount 把机器人和买家留言也算进去了：能看到回复明细时，以其中是否有店铺回复为准；
+  // 看不到明细（列表为空但计数大于 0）时无法判断作者，保守按已回复处理
+  const merchantReplied = Array.isArray(review.replyList) && review.replyList.length > 0
+    ? hasMerchantReply(review.replyList)
+    : Number(review.replyCount || 0) > 0;
+  return Boolean(review.replied || merchantReplied || hasTextValue(review.reply));
 }
 
 export function isUnrepliedStatus(replyStatus) {
@@ -283,7 +316,8 @@ export function summarizeReviewRecords(reviews = []) {
 }
 
 const REPLY_BLOCKED_MESSAGE_PATTERN = /不可评论|不支持回复|暂不支持回复|不能回复|无法回复|评价已关闭|评论已关闭|已设置为不可评论/;
-const REPLY_SUCCESS_MESSAGE_PATTERN = /回复成功|提交成功|操作成功/;
+// 「评价互动」侧栏（评价下已有机器人/买家留言时出现）用的是「发布」按钮，提示可能是发布/评论成功
+const REPLY_SUCCESS_MESSAGE_PATTERN = /回复成功|提交成功|操作成功|发布成功|评论成功/;
 
 export function classifyReplySubmitMessage(text = '') {
   const message = String(text || '').replace(/\s+/g, ' ').trim();
@@ -470,6 +504,7 @@ export function recordReplyRunOutcome(report, {
       report.skippedAlreadyReplied += 1;
     }
     const reviewStatus = classifyReviewStatus(review);
+    record.category = isReviewAlreadyReplied(review) || /已回复/.test(reason) ? 'replied' : reviewStatus;
     if (reviewStatus === 'flagged') report.skippedFlagged += 1;
     if (reviewStatus === 'uncertain') report.skippedUncertain += 1;
     if (reviewStatus === 'analysis_failed') report.skippedAnalysisFailed += 1;
@@ -534,8 +569,7 @@ export function mergeReviewRecords(existing = [], incoming = []) {
       || Object.prototype.hasOwnProperty.call(review, 'reply');
     const incomingExplicitlyUnreplied = hasExplicitReplyState
       && review.replied === false
-      && Number(review.replyCount || 0) === 0
-      && (!Array.isArray(review.replyList) || review.replyList.length === 0)
+      && !isReviewAlreadyReplied({ ...review, replied: false })
       && !hasTextValue(review.reply)
       && isUnrepliedStatus(review.replyStatus);
     const replied = Boolean(review.replied || (old?.replied && !incomingExplicitlyUnreplied));

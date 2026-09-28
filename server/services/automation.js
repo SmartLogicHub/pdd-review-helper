@@ -18,7 +18,7 @@ import { getReply, sentimentFingerprint } from './reply-strategy.js';
 import { createSentimentCache } from './sentiment-cache.js';
 import { detectShopNameForAccount, e2eDryRunAllPages, replyAll } from './playwright.js';
 import { notifyWecomRiskSummary, syncFlaggedReview } from './risk-sync.js';
-import { effectiveFlagReason, summarizeFailureReasons } from './review-normalizer.js';
+import { effectiveFlagReason, summarizeFailureReasons, summarizeRecordReasons } from './review-normalizer.js';
 
 function createStoredSentimentCache(accountId) {
   return createSentimentCache({
@@ -79,7 +79,9 @@ export function createAutomationManager({
   // 任务结束时：按原因汇总失败（界面上不再只能看到第一条失败），并把完整报告存盘备查
   function finalizeJob(job) {
     if (job.result && typeof job.result === 'object') {
-      job.result.failureReasons = summarizeFailureReasons(collectRunRecords(job.result));
+      const records = collectRunRecords(job.result);
+      job.result.failureReasons = summarizeFailureReasons(records);
+      job.result.skipReasons = summarizeRecordReasons(records, 'skip', 10);
     }
     if (typeof writeRunReport !== 'function') return;
     try {

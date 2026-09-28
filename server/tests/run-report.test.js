@@ -86,3 +86,19 @@ test('failed runs are persisted too, so crashes leave a trace', async () => {
   assert.equal(written[0].status, 'error');
   assert.equal(written[0].error, '浏览器启动失败');
 });
+
+test('skip reasons are grouped by category, since AI flag reasons are unique per review', async () => {
+  const { createReplyRunReport, recordReplyRunOutcome, summarizeRecordReasons } = await import('../services/review-normalizer.js');
+  const report = createReplyRunReport({ target: 5, totalRows: 5 });
+  recordReplyRunOutcome(report, { review: { reviewId: 'a', flagged: true }, status: 'skip', reason: '先夸后踩：降噪一般' });
+  recordReplyRunOutcome(report, { review: { reviewId: 'b', flagged: true }, status: 'skip', reason: '佩戴耳朵疼' });
+  recordReplyRunOutcome(report, { review: { reviewId: 'c', canInteract: false }, status: 'skip', reason: '平台不允许回复/互动' });
+  recordReplyRunOutcome(report, { review: { reviewId: 'd', replyCount: 1 }, status: 'skip', reason: '评价已回复' });
+
+  const summary = summarizeRecordReasons(report.records, 'skip');
+  assert.deepEqual(summary.map(item => [item.reason, item.count]), [
+    ['疑似差评（转人工）', 2],
+    ['平台不允许回复', 1],
+    ['已回复', 1],
+  ]);
+});

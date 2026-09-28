@@ -1802,7 +1802,7 @@ async function fillVisibleReplyTextarea(page, value) {
 
 async function collectReplySubmitMessages(page) {
   return page.evaluate(() => {
-    const pattern = /(不可评论|不支持回复|暂不支持回复|不能回复|无法回复|评价已关闭|评论已关闭|已设置为不可评论|回复成功|提交成功|操作成功)/;
+    const pattern = /(不可评论|不支持回复|暂不支持回复|不能回复|无法回复|评价已关闭|评论已关闭|已设置为不可评论|回复成功|提交成功|操作成功|发布成功|评论成功)/;
     const isVisible = (node) => {
       if (!node || !node.getBoundingClientRect) return false;
       const rect = node.getBoundingClientRect();
@@ -1838,7 +1838,13 @@ async function submitVisibleReplyDialog(page) {
   const modal = page.locator('[class*="modal"], [class*="dialog"], [class*="drawer"]').filter({
     has: page.locator('textarea'),
   }).last();
-  const button = modal.locator('button').filter({ hasText: /^(回复|提交|确认)$/ }).last();
+  // 拼多多有两种回复弹窗：没有留言的评价是「快捷回复」框（按钮「回复」）；
+  // 已有平台机器人/买家留言的评价是「评价互动」侧栏（按钮「发布」，留言旁还有回复留言用的「回复」链接）。
+  // 优先点「发布/提交/确认」，避免误点回复留言的入口；都没有时再用「回复」。
+  const primary = modal.locator('button').filter({ hasText: /^(发布|提交|确认)$/ });
+  const button = (await primary.count()) > 0
+    ? primary.last()
+    : modal.locator('button').filter({ hasText: /^回复$/ }).last();
   await safeClick(page, button, '回复提交按钮', { forceLast: true });
   const feedback = await waitForReplySubmitFeedback(page);
   await randomDelay(600, 1000);
@@ -1888,12 +1894,14 @@ async function closeReplyDialog(page) {
       if (!isVisible(node)) return false;
       const text = String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
       const aria = String(node.getAttribute('aria-label') || '');
+      // SVG 图标（「评价互动」侧栏的关闭按钮）的 className 是对象，要读 class 属性
       return /关闭|取消|×|close/i.test(`${text} ${aria}`)
-        || /close/i.test(String(node.className || ''));
+        || /close/i.test(String(node.getAttribute('class') || ''));
     });
 
     if (!closeControl) return false;
-    closeControl.click();
+    // SVG 元素没有 .click()，统一派发点击事件
+    closeControl.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     return true;
   }).catch(() => false);
 
@@ -1960,6 +1968,10 @@ async function submitReplyForReview(page, review, replyText, {
         fillResult,
         networkRequests,
       };
+    }
+    // 「评价互动」侧栏发布后不一定自动关闭，留着会挡住下一条评价的「回复/互动」入口
+    if (!(await waitForNoVisibleReplyTextarea(page, 1500))) {
+      await closeReplyDialog(page);
     }
     return {
       submitted: true,

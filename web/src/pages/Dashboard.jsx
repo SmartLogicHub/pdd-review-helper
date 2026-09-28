@@ -860,6 +860,14 @@ export default function Dashboard() {
               ))}
             </div>
           )}
+          {Array.isArray(replyReport.skipReasons) && replyReport.skipReasons.length > 0 && (
+            <div style={{ color: '#726C83', fontSize: 12, marginTop: 8, lineHeight: 1.7 }}>
+              <div style={{ fontWeight: 700 }}>跳过原因汇总：</div>
+              {replyReport.skipReasons.map(item => (
+                <div key={item.reason}>· {item.reason}：{item.count} 条（例：{String(item.example).slice(0, 60)}）</div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
